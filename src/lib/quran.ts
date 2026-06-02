@@ -63,3 +63,41 @@ export async function fetchVerses(chapterId: number): Promise<Verse[]> {
 export function pageLabel(pages: [number, number]): string {
   return pages[0] === pages[1] ? `Page ${pages[0]}` : `Pages ${pages[0]}–${pages[1]}`;
 }
+
+export type JuzRange = [number, number];
+
+export async function fetchJuzMap(): Promise<Map<number, JuzRange>> {
+  const res = await fetch(`${QURAN_API}/juzs`, {
+    next: { revalidate: 60 * 60 * 24 * 30 },
+  });
+  if (!res.ok) throw new Error(`Failed to fetch juzs: ${res.status}`);
+  const data = (await res.json()) as {
+    juzs: {
+      juz_number: number;
+      verse_mapping: Record<string, string>;
+    }[];
+  };
+  const seen = new Set<number>();
+  const chapterToJuz = new Map<number, Set<number>>();
+  for (const j of data.juzs) {
+    if (seen.has(j.juz_number)) continue;
+    seen.add(j.juz_number);
+    for (const chapterIdStr of Object.keys(j.verse_mapping)) {
+      const chapterId = Number(chapterIdStr);
+      if (!chapterToJuz.has(chapterId)) chapterToJuz.set(chapterId, new Set());
+      chapterToJuz.get(chapterId)!.add(j.juz_number);
+    }
+  }
+  const out = new Map<number, JuzRange>();
+  for (const [chapterId, juzSet] of chapterToJuz) {
+    const arr = [...juzSet].sort((a, b) => a - b);
+    out.set(chapterId, [arr[0], arr[arr.length - 1]]);
+  }
+  return out;
+}
+
+export function juzLabel(range: JuzRange): string {
+  return range[0] === range[1]
+    ? `Juz ${range[0]}`
+    : `Juz ${range[0]}–${range[1]}`;
+}

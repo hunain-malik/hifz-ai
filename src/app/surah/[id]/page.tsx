@@ -1,6 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { fetchChapter, fetchVerses, pageLabel, type Chapter } from "@/lib/quran";
+import {
+  fetchChapter,
+  fetchJuzMap,
+  fetchVerses,
+  juzLabel,
+  pageLabel,
+  type Chapter,
+} from "@/lib/quran";
 import { SurahView } from "@/components/SurahView";
 
 export default async function SurahPage(props: PageProps<"/surah/[id]">) {
@@ -10,12 +17,14 @@ export default async function SurahPage(props: PageProps<"/surah/[id]">) {
     notFound();
   }
 
-  const [chapter, verses, prev, next] = await Promise.all([
+  const [chapter, verses, prev, next, juzMap] = await Promise.all([
     fetchChapter(surahId),
     fetchVerses(surahId),
     surahId > 1 ? fetchChapter(surahId - 1) : Promise.resolve(null),
     surahId < 114 ? fetchChapter(surahId + 1) : Promise.resolve(null),
+    fetchJuzMap(),
   ]);
+  const juz = juzMap.get(surahId);
 
   return (
     <div>
@@ -44,11 +53,25 @@ export default async function SurahPage(props: PageProps<"/surah/[id]">) {
             </span>
           </h1>
           <div className="flex flex-wrap items-center gap-2 mt-2">
-            <span className="inline-flex items-center rounded-md bg-emerald-100 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-200 text-xs font-medium px-2 py-0.5 tabular-nums">
-              {pageLabel(chapter.pages)} of the Mushaf
+            <span className="inline-flex items-center rounded-md bg-emerald-100 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-200 text-xs font-semibold px-2 py-0.5 tabular-nums">
+              📖 {pageLabel(chapter.pages)}
+            </span>
+            {juz && (
+              <span className="inline-flex items-center rounded-md bg-indigo-100 dark:bg-indigo-950/60 text-indigo-900 dark:text-indigo-200 text-xs font-semibold px-2 py-0.5 tabular-nums">
+                📚 {juzLabel(juz)}
+              </span>
+            )}
+            <span
+              className={`inline-flex items-center rounded-md text-xs font-semibold px-2 py-0.5 capitalize ${
+                chapter.revelation_place === "makkah"
+                  ? "bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200"
+                  : "bg-sky-100 dark:bg-sky-950/60 text-sky-900 dark:text-sky-200"
+              }`}
+            >
+              {chapter.revelation_place === "makkah" ? "🕋 Makki" : "🕌 Madani"}
             </span>
             <span className="text-xs text-stone-500 dark:text-stone-400">
-              {chapter.verses_count} verses · revealed in {chapter.revelation_place}
+              {chapter.verses_count} verses
             </span>
           </div>
         </div>

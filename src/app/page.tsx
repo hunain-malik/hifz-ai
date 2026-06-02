@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { fetchChapters, pageLabel } from "@/lib/quran";
+import { fetchChapters, fetchJuzMap, juzLabel, pageLabel } from "@/lib/quran";
 
 export default async function Home() {
-  const chapters = await fetchChapters();
+  const [chapters, juzMap] = await Promise.all([fetchChapters(), fetchJuzMap()]);
 
   return (
     <div>
@@ -50,11 +50,16 @@ export default async function Home() {
                   </p>
                 </div>
                 <div className="flex flex-wrap items-stretch gap-0 mt-1.5 border-t border-stone-200 dark:border-stone-800">
-                  <span className="flex-1 min-w-[140px] inline-flex items-center justify-center gap-1 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-900 dark:text-emerald-200 text-sm font-bold px-3 py-1.5 tabular-nums whitespace-nowrap">
+                  <span className="flex-1 min-w-[110px] inline-flex items-center justify-center gap-1 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-900 dark:text-emerald-200 text-sm font-bold px-2 py-1.5 tabular-nums whitespace-nowrap">
                     📖 {pageLabel(c.pages)}
                   </span>
+                  {juzMap.get(c.id) && (
+                    <span className="flex-1 min-w-[90px] inline-flex items-center justify-center gap-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-900 dark:text-indigo-200 text-sm font-bold px-2 py-1.5 tabular-nums whitespace-nowrap">
+                      📚 {juzLabel(juzMap.get(c.id)!)}
+                    </span>
+                  )}
                   <span
-                    className={`flex-1 min-w-[80px] inline-flex items-center justify-center text-sm font-bold px-3 py-1.5 capitalize whitespace-nowrap ${
+                    className={`flex-1 min-w-[80px] inline-flex items-center justify-center text-sm font-bold px-2 py-1.5 capitalize whitespace-nowrap ${
                       c.revelation_place === "makkah"
                         ? "bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200"
                         : "bg-sky-100 dark:bg-sky-900/40 text-sky-900 dark:text-sky-200"
