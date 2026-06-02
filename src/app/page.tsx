@@ -26,45 +26,43 @@ export default async function Home() {
             <li key={c.id}>
               <Link
                 href={`/surah/${c.id}`}
-                className="flex items-start justify-between gap-3 rounded-lg border border-stone-200 dark:border-stone-800 px-3 py-2.5 hover:bg-stone-100 dark:hover:bg-stone-900 transition-colors"
+                className="block rounded-lg border border-stone-200 dark:border-stone-800 hover:bg-stone-100 dark:hover:bg-stone-900 transition-colors overflow-hidden"
               >
-                <span className="flex items-start gap-3 min-w-0 flex-1">
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-stone-100 dark:bg-stone-800 text-xs font-medium tabular-nums">
-                    {c.id}
-                  </span>
-                  <span className="flex flex-col min-w-0 gap-1">
-                    <span className="font-medium leading-tight">
+                <div className="flex items-center justify-between gap-2 px-3 pt-2.5 pb-1">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-stone-100 dark:bg-stone-800 text-xs font-medium tabular-nums">
+                      {c.id}
+                    </span>
+                    <span className="font-semibold text-base leading-tight truncate min-w-0">
                       {c.name_simple}
                     </span>
-                    <span className="text-xs text-stone-500 dark:text-stone-400">
-                      {c.translated_name.name} · {c.verses_count} verses
-                    </span>
-                    <span className="flex flex-wrap gap-1.5 mt-0.5">
-                      <span
-                        className="inline-flex items-center rounded-md bg-emerald-100 dark:bg-emerald-900/60 text-emerald-900 dark:text-emerald-200 text-xs font-semibold px-2 py-0.5 tabular-nums whitespace-nowrap"
-                        title={`Mushaf ${pageLabel(c.pages).toLowerCase()}`}
-                      >
-                        📖 {pageLabel(c.pages)}
-                      </span>
-                      <span
-                        className={`inline-flex items-center rounded-md text-xs font-semibold px-2 py-0.5 capitalize whitespace-nowrap ${
-                          c.revelation_place === "makkah"
-                            ? "bg-amber-100 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200"
-                            : "bg-sky-100 dark:bg-sky-900/60 text-sky-900 dark:text-sky-200"
-                        }`}
-                        title={`Revealed in ${c.revelation_place}`}
-                      >
-                        {c.revelation_place === "makkah" ? "Makki" : "Madani"}
-                      </span>
-                    </span>
+                  </div>
+                  <span
+                    className="arabic shrink-0"
+                    style={{ fontSize: "1.4rem", lineHeight: "1" }}
+                  >
+                    {c.name_arabic}
                   </span>
-                </span>
-                <span
-                  className="arabic shrink-0"
-                  style={{ fontSize: "1.5rem", lineHeight: "1" }}
-                >
-                  {c.name_arabic}
-                </span>
+                </div>
+                <div className="px-3 pb-1">
+                  <p className="text-xs text-stone-500 dark:text-stone-400 truncate">
+                    {c.translated_name.name} · {c.verses_count} verses
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-stretch gap-0 mt-1.5 border-t border-stone-200 dark:border-stone-800">
+                  <span className="flex-1 min-w-[140px] inline-flex items-center justify-center gap-1 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-900 dark:text-emerald-200 text-sm font-bold px-3 py-1.5 tabular-nums whitespace-nowrap">
+                    📖 {pageLabel(c.pages)}
+                  </span>
+                  <span
+                    className={`flex-1 min-w-[80px] inline-flex items-center justify-center text-sm font-bold px-3 py-1.5 capitalize whitespace-nowrap ${
+                      c.revelation_place === "makkah"
+                        ? "bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200"
+                        : "bg-sky-100 dark:bg-sky-900/40 text-sky-900 dark:text-sky-200"
+                    }`}
+                  >
+                    {c.revelation_place === "makkah" ? "🕋 Makki" : "🕌 Madani"}
+                  </span>
+                </div>
               </Link>
             </li>
           ))}

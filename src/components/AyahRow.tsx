@@ -93,19 +93,19 @@ export function AyahRow({
           : "border-stone-200 dark:border-stone-800"
       }`}
     >
-      <div className="flex items-start justify-between gap-3 mb-3">
-        <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div className="flex items-center gap-1.5 shrink-0">
           <span className="flex h-7 min-w-7 items-center justify-center rounded-md bg-stone-100 dark:bg-stone-800 text-xs font-medium tabular-nums px-1.5">
             {verse.verse_number}
           </span>
           <span
-            className="inline-flex items-center rounded-md bg-emerald-100 dark:bg-emerald-900/60 text-emerald-900 dark:text-emerald-200 text-xs font-semibold px-2 py-0.5 tabular-nums whitespace-nowrap"
+            className="inline-flex items-center rounded-md bg-emerald-100 dark:bg-emerald-900/60 text-emerald-900 dark:text-emerald-200 text-xs font-bold px-2 py-0.5 tabular-nums whitespace-nowrap"
             title={`Mushaf page ${verse.page_number}`}
           >
-            📖 p.{verse.page_number}
+            📖 Page {verse.page_number}
           </span>
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="flex gap-2 shrink-0 ml-auto">
           <button
             type="button"
             onClick={listen}
