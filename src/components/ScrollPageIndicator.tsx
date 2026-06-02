@@ -69,9 +69,9 @@ export function ScrollPageIndicator({ verses }: { verses: Verse[] }) {
   return (
     <aside
       aria-hidden
-      className="hidden sm:flex fixed right-3 top-1/2 -translate-y-1/2 z-20 flex-col items-center gap-2 pointer-events-none"
+      className="fixed right-2 sm:right-3 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center gap-2 pointer-events-none"
     >
-      <div className="relative h-40 w-1 rounded-full bg-stone-200 dark:bg-stone-800 overflow-hidden">
+      <div className="hidden sm:block relative h-40 w-1 rounded-full bg-stone-200 dark:bg-stone-800 overflow-hidden">
         <div
           className="absolute left-0 right-0 top-0 bg-emerald-500 dark:bg-emerald-600 transition-[height] duration-150"
           style={{ height: `${Math.min(100, Math.max(0, progress * 100))}%` }}
@@ -79,9 +79,9 @@ export function ScrollPageIndicator({ verses }: { verses: Verse[] }) {
       </div>
       <div
         key={bumpKey}
-        className="rounded-full bg-emerald-600 text-white text-xs font-medium px-2.5 py-1 shadow-md tabular-nums animate-[bump_400ms_ease-out]"
+        className="rounded-full bg-emerald-600 text-white text-sm font-bold px-3 py-1.5 shadow-lg tabular-nums animate-[bump_400ms_ease-out] ring-2 ring-white dark:ring-stone-900"
       >
-        Page {currentPage}
+        📖 Page {currentPage}
       </div>
     </aside>
   );

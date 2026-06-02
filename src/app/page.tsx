@@ -39,18 +39,18 @@ export default async function Home() {
                     <span className="text-xs text-stone-500 dark:text-stone-400">
                       {c.translated_name.name} · {c.verses_count} verses
                     </span>
-                    <span className="flex flex-wrap gap-1.5">
+                    <span className="flex flex-wrap gap-1.5 mt-0.5">
                       <span
-                        className="inline-flex items-center rounded-md bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 text-[10px] font-medium px-1.5 py-0.5 tabular-nums whitespace-nowrap"
+                        className="inline-flex items-center rounded-md bg-emerald-100 dark:bg-emerald-900/60 text-emerald-900 dark:text-emerald-200 text-xs font-semibold px-2 py-0.5 tabular-nums whitespace-nowrap"
                         title={`Mushaf ${pageLabel(c.pages).toLowerCase()}`}
                       >
-                        {pageLabel(c.pages)}
+                        📖 {pageLabel(c.pages)}
                       </span>
                       <span
-                        className={`inline-flex items-center rounded-md text-[10px] font-medium px-1.5 py-0.5 capitalize whitespace-nowrap ${
+                        className={`inline-flex items-center rounded-md text-xs font-semibold px-2 py-0.5 capitalize whitespace-nowrap ${
                           c.revelation_place === "makkah"
-                            ? "bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300"
-                            : "bg-sky-50 dark:bg-sky-950/60 text-sky-800 dark:text-sky-300"
+                            ? "bg-amber-100 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200"
+                            : "bg-sky-100 dark:bg-sky-900/60 text-sky-900 dark:text-sky-200"
                         }`}
                         title={`Revealed in ${c.revelation_place}`}
                       >
