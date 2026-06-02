@@ -18,3 +18,9 @@
   padding: 0 0.15rem;
   border-radius: 0.25rem;
 }
+
+@keyframes bump {
+  0% { transform: scale(0.92); opacity: 0.6; }
+  60% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}

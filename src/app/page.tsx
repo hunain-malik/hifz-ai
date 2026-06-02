@@ -37,16 +37,23 @@ export default async function Home() {
                       {c.name_simple}
                     </span>
                     <span className="text-xs text-stone-500 dark:text-stone-400 truncate">
-                      {c.translated_name.name} · {c.verses_count} verses ·{" "}
-                      {pageLabel(c.pages)}
+                      {c.translated_name.name} · {c.verses_count} verses
                     </span>
                   </span>
                 </span>
-                <span
-                  className="arabic shrink-0"
-                  style={{ fontSize: "1.5rem", lineHeight: "1" }}
-                >
-                  {c.name_arabic}
+                <span className="flex items-center gap-2.5 shrink-0">
+                  <span
+                    className="inline-flex items-center rounded-md bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 text-[10px] font-medium px-1.5 py-0.5 tabular-nums whitespace-nowrap"
+                    title={`Mushaf ${pageLabel(c.pages).toLowerCase()}`}
+                  >
+                    {pageLabel(c.pages)}
+                  </span>
+                  <span
+                    className="arabic"
+                    style={{ fontSize: "1.5rem", lineHeight: "1" }}
+                  >
+                    {c.name_arabic}
+                  </span>
                 </span>
               </Link>
             </li>

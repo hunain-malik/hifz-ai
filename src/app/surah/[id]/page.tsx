@@ -34,9 +34,14 @@ export default async function SurahPage(props: PageProps<"/surah/[id]">) {
               · {chapter.translated_name.name}
             </span>
           </h1>
-          <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
-            {chapter.verses_count} verses · {pageLabel(chapter.pages)} of the Mushaf · revealed in {chapter.revelation_place}
-          </p>
+          <div className="flex flex-wrap items-center gap-2 mt-2">
+            <span className="inline-flex items-center rounded-md bg-emerald-100 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-200 text-xs font-medium px-2 py-0.5 tabular-nums">
+              {pageLabel(chapter.pages)} of the Mushaf
+            </span>
+            <span className="text-xs text-stone-500 dark:text-stone-400">
+              {chapter.verses_count} verses · revealed in {chapter.revelation_place}
+            </span>
+          </div>
         </div>
         <span className="arabic" style={{ fontSize: "2rem", lineHeight: "1" }}>
           {chapter.name_arabic}

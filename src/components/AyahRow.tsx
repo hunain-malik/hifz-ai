@@ -85,6 +85,8 @@ export function AyahRow({
   return (
     <li
       id={`ayah-${verse.verse_key}`}
+      data-verse-key={verse.verse_key}
+      data-page-number={verse.page_number}
       className={`rounded-lg border bg-white dark:bg-stone-900 p-4 transition-colors ${
         activeWord !== null
           ? "border-emerald-400 dark:border-emerald-700 shadow-sm"

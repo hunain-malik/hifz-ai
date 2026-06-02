@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_RECITER_ID, RECITERS, getReciter } from "@/lib/reciters";
 import type { Verse } from "@/lib/quran";
 import { AyahRow } from "./AyahRow";
+import { PageDivider } from "./PageDivider";
+import { ScrollPageIndicator } from "./ScrollPageIndicator";
 import {
   PlayerProvider,
   useActiveVerseKey,
@@ -65,15 +67,23 @@ export function SurahView({
   return (
     <PlayerProvider reciterId={reciter.id} surahId={surahId}>
       <ControlsBar reciterId={reciterId} onReciter={chooseReciter} />
+      <ScrollPageIndicator verses={verses} />
       <ol className="flex flex-col gap-3">
-        {verses.map((v) => (
-          <AyahRow
-            key={v.id}
-            verse={v}
-            registry={registry}
-            hasNext={v.verse_number < lastVerseNumber}
-          />
-        ))}
+        {verses.map((v, i) => {
+          const prevPage = verses[i - 1]?.page_number;
+          const showDivider =
+            prevPage !== undefined && v.page_number !== prevPage;
+          return (
+            <Fragment key={v.id}>
+              {showDivider && <PageDivider page={v.page_number} />}
+              <AyahRow
+                verse={v}
+                registry={registry}
+                hasNext={v.verse_number < lastVerseNumber}
+              />
+            </Fragment>
+          );
+        })}
       </ol>
     </PlayerProvider>
   );

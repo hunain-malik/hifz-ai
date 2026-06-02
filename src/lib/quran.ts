@@ -15,6 +15,7 @@ export type Verse = {
   verse_key: string;
   verse_number: number;
   text_uthmani: string;
+  page_number: number;
 };
 
 export async function fetchChapters(): Promise<Chapter[]> {
@@ -37,16 +38,25 @@ export async function fetchChapter(id: number): Promise<Chapter> {
 
 export async function fetchVerses(chapterId: number): Promise<Verse[]> {
   const res = await fetch(
-    `${QURAN_API}/quran/verses/uthmani?chapter_number=${chapterId}`,
+    `${QURAN_API}/verses/by_chapter/${chapterId}?fields=text_uthmani,page_number&per_page=300`,
     { next: { revalidate: 60 * 60 * 24 * 30 } }
   );
   if (!res.ok) throw new Error(`Failed to fetch verses: ${res.status}`);
   const data = (await res.json()) as {
-    verses: { id: number; verse_key: string; text_uthmani: string }[];
+    verses: {
+      id: number;
+      verse_key: string;
+      verse_number: number;
+      text_uthmani: string;
+      page_number: number;
+    }[];
   };
   return data.verses.map((v) => ({
-    ...v,
-    verse_number: Number(v.verse_key.split(":")[1]),
+    id: v.id,
+    verse_key: v.verse_key,
+    verse_number: v.verse_number,
+    text_uthmani: v.text_uthmani,
+    page_number: v.page_number,
   }));
 }
 
