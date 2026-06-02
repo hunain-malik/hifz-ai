@@ -44,7 +44,7 @@ export default function RootLayout({
         </main>
         <footer className="border-t border-stone-200 dark:border-stone-800 text-xs text-stone-500 dark:text-stone-400">
           <div className="max-w-5xl mx-auto px-4 py-4">
-            Text from quran.com · Audio from everyayah.com · ASR via tarteel-ai/whisper-base-ar-quran
+            Text + audio from quran.com / qurancdn.com · Recitation recognition runs in your browser via Web Speech API
           </div>
         </footer>
       </body>

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { fetchChapters } from "@/lib/quran";
+import { fetchChapters, pageLabel } from "@/lib/quran";
 
 export default async function Home() {
   const chapters = await fetchChapters();
@@ -38,7 +38,7 @@ export default async function Home() {
                     </span>
                     <span className="text-xs text-stone-500 dark:text-stone-400 truncate">
                       {c.translated_name.name} · {c.verses_count} verses ·{" "}
-                      {c.revelation_place}
+                      {pageLabel(c.pages)}
                     </span>
                   </span>
                 </span>

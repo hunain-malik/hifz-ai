@@ -7,6 +7,7 @@ export type Chapter = {
   name_arabic: string;
   translated_name: { name: string };
   verses_count: number;
+  pages: [number, number];
 };
 
 export type Verse = {
@@ -47,4 +48,8 @@ export async function fetchVerses(chapterId: number): Promise<Verse[]> {
     ...v,
     verse_number: Number(v.verse_key.split(":")[1]),
   }));
+}
+
+export function pageLabel(pages: [number, number]): string {
+  return pages[0] === pages[1] ? `Page ${pages[0]}` : `Pages ${pages[0]}–${pages[1]}`;
 }

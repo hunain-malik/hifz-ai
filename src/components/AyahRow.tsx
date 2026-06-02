@@ -1,114 +1,96 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import type { Reciter } from "@/lib/reciters";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Verse } from "@/lib/quran";
-import { ayahAudioUrl } from "@/lib/audio";
 import { diffRecitation, accuracyScore, type DiffToken } from "@/lib/diff";
+import {
+  isSpeechRecognitionAvailable,
+  startRecognition,
+  type Recognizer,
+} from "@/lib/speechRecognition";
+import { usePlayer, useWordIndexFor } from "./PlayerProvider";
+import type { ReciteRegistry } from "./SurahView";
 
-type State =
+type RecState =
   | { kind: "idle" }
-  | { kind: "recording" }
-  | { kind: "transcribing" }
+  | { kind: "listening" }
   | { kind: "result"; tokens: DiffToken[]; transcript: string }
   | { kind: "error"; message: string };
 
 export function AyahRow({
-  surahId,
   verse,
-  reciter,
+  registry,
+  hasNext,
 }: {
-  surahId: number;
   verse: Verse;
-  reciter: Reciter;
+  registry: ReciteRegistry;
+  hasNext: boolean;
 }) {
-  const [state, setState] = useState<State>({ kind: "idle" });
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const { store, audioStatus } = usePlayer();
+  const [rec, setRec] = useState<RecState>({ kind: "idle" });
+  const recognizerRef = useRef<Recognizer | null>(null);
 
-  const audioUrl = ayahAudioUrl(reciter, surahId, verse.verse_number);
+  const words = useMemo(
+    () => verse.text_uthmani.trim().split(/\s+/),
+    [verse.text_uthmani]
+  );
+  const activeWord = useWordIndexFor(verse.verse_key);
+
+  useEffect(
+    () => () => {
+      recognizerRef.current?.abort();
+    },
+    []
+  );
 
   useEffect(() => {
-    return () => {
-      recorderRef.current?.stream.getTracks().forEach((t) => t.stop());
-    };
-  }, []);
+    return registry.register(verse.verse_number, () => startReciteRef.current());
+  }, [registry, verse.verse_number]);
 
-  function play() {
-    if (!audioRef.current) {
-      audioRef.current = new Audio(audioUrl);
-    } else {
-      audioRef.current.src = audioUrl;
-    }
-    void audioRef.current.play();
+  const startReciteRef = useRef<() => void>(() => {});
+
+  function listen() {
+    store.playFromVerse(verse.verse_key, { singleVerse: true });
   }
 
-  async function startRecording() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mime = pickMimeType();
-      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
-      chunksRef.current = [];
-      rec.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-      rec.onstop = () => {
-        const blob = new Blob(chunksRef.current, {
-          type: rec.mimeType || "audio/webm",
-        });
-        stream.getTracks().forEach((t) => t.stop());
-        void transcribe(blob);
-      };
-      recorderRef.current = rec;
-      rec.start();
-      setState({ kind: "recording" });
-    } catch (err) {
-      setState({
+  function startRecite() {
+    if (!isSpeechRecognitionAvailable()) {
+      setRec({
         kind: "error",
         message:
-          err instanceof Error
-            ? err.message
-            : "Could not access microphone. Check permissions.",
+          "Speech recognition isn't available in this browser. Use Chrome or Edge.",
       });
+      return;
     }
+    setRec({ kind: "listening" });
+    recognizerRef.current = startRecognition({
+      lang: "ar-SA",
+      onResult: (transcript) => {
+        const tokens = diffRecitation(verse.text_uthmani, transcript);
+        setRec({ kind: "result", tokens, transcript });
+      },
+      onError: (message) => setRec({ kind: "error", message }),
+      onEnd: () => {
+        recognizerRef.current = null;
+      },
+    });
   }
 
-  function stopRecording() {
-    recorderRef.current?.stop();
-    setState({ kind: "transcribing" });
-  }
+  startReciteRef.current = startRecite;
 
-  async function transcribe(blob: Blob) {
-    try {
-      const res = await fetch("/api/transcribe", {
-        method: "POST",
-        headers: { "Content-Type": blob.type },
-        body: blob,
-      });
-      if (!res.ok) {
-        const { error } = (await res.json().catch(() => ({}))) as {
-          error?: string;
-        };
-        throw new Error(error ?? `Transcription failed (${res.status}).`);
-      }
-      const { text } = (await res.json()) as { text: string };
-      const tokens = diffRecitation(verse.text_uthmani, text);
-      setState({ kind: "result", tokens, transcript: text });
-    } catch (err) {
-      setState({
-        kind: "error",
-        message: err instanceof Error ? err.message : "Transcription failed.",
-      });
-    }
-  }
-
-  function reset() {
-    setState({ kind: "idle" });
+  function stopRecite() {
+    recognizerRef.current?.stop();
   }
 
   return (
-    <li className="rounded-lg border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 p-4">
+    <li
+      id={`ayah-${verse.verse_key}`}
+      className={`rounded-lg border bg-white dark:bg-stone-900 p-4 transition-colors ${
+        activeWord !== null
+          ? "border-emerald-400 dark:border-emerald-700 shadow-sm"
+          : "border-stone-200 dark:border-stone-800"
+      }`}
+    >
       <div className="flex items-start justify-between gap-3 mb-3">
         <span className="flex h-7 min-w-7 items-center justify-center rounded-md bg-stone-100 dark:bg-stone-800 text-xs font-medium tabular-nums px-1.5">
           {verse.verse_number}
@@ -116,31 +98,24 @@ export function AyahRow({
         <div className="flex gap-2 shrink-0">
           <button
             type="button"
-            onClick={play}
-            className="text-xs rounded-md border border-stone-300 dark:border-stone-700 px-2.5 py-1 hover:bg-stone-100 dark:hover:bg-stone-800"
+            onClick={listen}
+            disabled={audioStatus !== "ready"}
+            className="text-xs rounded-md border border-stone-300 dark:border-stone-700 px-2.5 py-1 hover:bg-stone-100 dark:hover:bg-stone-800 disabled:opacity-40"
           >
             ▶ Listen
           </button>
-          {state.kind === "recording" ? (
+          {rec.kind === "listening" ? (
             <button
               type="button"
-              onClick={stopRecording}
+              onClick={stopRecite}
               className="text-xs rounded-md bg-red-600 text-white px-2.5 py-1 hover:bg-red-700"
             >
               ⏹ Stop
             </button>
-          ) : state.kind === "transcribing" ? (
-            <button
-              type="button"
-              disabled
-              className="text-xs rounded-md border border-stone-300 dark:border-stone-700 px-2.5 py-1 opacity-60"
-            >
-              Transcribing…
-            </button>
           ) : (
             <button
               type="button"
-              onClick={startRecording}
+              onClick={startRecite}
               className="text-xs rounded-md bg-emerald-600 text-white px-2.5 py-1 hover:bg-emerald-700"
             >
               🎙 Recite
@@ -149,19 +124,50 @@ export function AyahRow({
         </div>
       </div>
 
-      <p className="arabic">{verse.text_uthmani}</p>
+      <p className="arabic">
+        {words.map((w, i) => {
+          const wordPos = i + 1;
+          const isActive = activeWord === wordPos;
+          return (
+            <span
+              key={i}
+              className={`arabic-word ${
+                isActive
+                  ? "bg-emerald-200 dark:bg-emerald-900/70 text-emerald-950 dark:text-emerald-100"
+                  : ""
+              }`}
+            >
+              {w}
+              {i < words.length - 1 ? " " : ""}
+            </span>
+          );
+        })}
+      </p>
 
-      {state.kind === "result" && (
+      {rec.kind === "listening" && (
+        <p className="mt-3 text-xs text-stone-500 dark:text-stone-400">
+          Listening — recite the ayah, then hit Stop.
+        </p>
+      )}
+      {rec.kind === "result" && (
         <Feedback
-          tokens={state.tokens}
-          transcript={state.transcript}
-          onReset={reset}
+          tokens={rec.tokens}
+          transcript={rec.transcript}
+          onReset={() => setRec({ kind: "idle" })}
+          onAdvance={
+            hasNext
+              ? () => registry.advanceFrom(verse.verse_number)
+              : undefined
+          }
         />
       )}
-      {state.kind === "error" && (
+      {rec.kind === "error" && (
         <div className="mt-3 text-sm text-red-600 dark:text-red-400">
-          {state.message}{" "}
-          <button onClick={reset} className="underline">
+          {rec.message}{" "}
+          <button
+            onClick={() => setRec({ kind: "idle" })}
+            className="underline"
+          >
             try again
           </button>
         </div>
@@ -174,10 +180,12 @@ function Feedback({
   tokens,
   transcript,
   onReset,
+  onAdvance,
 }: {
   tokens: DiffToken[];
   transcript: string;
   onReset: () => void;
+  onAdvance?: () => void;
 }) {
   const score = accuracyScore(tokens);
   return (
@@ -186,12 +194,22 @@ function Feedback({
         <p className="text-xs uppercase tracking-wider text-stone-500 dark:text-stone-400">
           Feedback · {score}% words correct
         </p>
-        <button
-          onClick={onReset}
-          className="text-xs text-stone-500 dark:text-stone-400 hover:underline"
-        >
-          retry
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onReset}
+            className="text-xs text-stone-500 dark:text-stone-400 hover:underline"
+          >
+            retry
+          </button>
+          {onAdvance && (
+            <button
+              onClick={onAdvance}
+              className="text-xs font-medium text-emerald-700 dark:text-emerald-400 hover:underline"
+            >
+              Next ayah →
+            </button>
+          )}
+        </div>
       </div>
       <p className="arabic">
         {tokens.map((t, i) => (
@@ -232,15 +250,4 @@ function Feedback({
       </details>
     </div>
   );
-}
-
-function pickMimeType(): string | undefined {
-  const candidates = [
-    "audio/webm;codecs=opus",
-    "audio/webm",
-    "audio/mp4",
-    "audio/ogg;codecs=opus",
-  ];
-  if (typeof MediaRecorder === "undefined") return undefined;
-  return candidates.find((c) => MediaRecorder.isTypeSupported(c));
 }

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { fetchChapter, fetchVerses } from "@/lib/quran";
+import { fetchChapter, fetchVerses, pageLabel } from "@/lib/quran";
 import { SurahView } from "@/components/SurahView";
 
 export default async function SurahPage(props: PageProps<"/surah/[id]">) {
@@ -35,7 +35,7 @@ export default async function SurahPage(props: PageProps<"/surah/[id]">) {
             </span>
           </h1>
           <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
-            {chapter.verses_count} verses · revealed in {chapter.revelation_place}
+            {chapter.verses_count} verses · {pageLabel(chapter.pages)} of the Mushaf · revealed in {chapter.revelation_place}
           </p>
         </div>
         <span className="arabic" style={{ fontSize: "2rem", lineHeight: "1" }}>

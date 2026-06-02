@@ -1,33 +1,43 @@
 # Hifz AI
 
-A Quran memorization and recitation-practice web app. Pick any ayah, listen to a prominent reciter, recite into your mic, and get word-level feedback from an AI model fine-tuned on Quran recitation.
+A Quran memorization and recitation-practice web app. Pick any surah, listen to a prominent reciter with live word-level highlighting as they recite, then recite into your mic to get word-level accuracy feedback.
 
-> **Not a replacement for a qualified teacher.** AI cannot judge tajweed at phoneme level. Use this to drill word accuracy and as a recitation companion alongside a real `mu'allim`.
+🌐 **Live:** <https://hifz-ai-beta.vercel.app/>
+
+> **Not a replacement for a qualified teacher.** Speech recognition can't judge tajweed at phoneme level. Use this to drill word accuracy and as a recitation companion alongside a real `mu'allim`.
+
+## Features
+
+- 114 surahs from quran.com with English + Arabic names and Mushaf page ranges
+- 12 reciters (Mishary, Sudais, Husary, Minshawi, AbdulBaset, Al-Shatri, Hani Ar-Rifai, Shuraim, Al-Tablawi — Murattal, Mujawwad, and Mu'allim styles)
+- **Single full-surah audio file** per reciter — gapless playback, pause/resume, jump-to-ayah
+- **Live word highlighting** during playback, synced from word-level segment timings
+- Auto-scroll to the active ayah as the reciter moves
+- **Recite mode**: in-browser speech recognition (Web Speech API, ar-SA), diffed against the ayah text
+- "Next ayah →" advances recite mode through a surah automatically
 
 ## Stack
 
 - **Next.js 16** (App Router) + TypeScript + Tailwind v4
-- **Quran text:** [quran.com API v4](https://api-docs.quran.com/) — Uthmani script, Hafs (phase 1)
-- **Reciter audio:** [everyayah.com](https://everyayah.com/) — Mishary, Sudais, Husary (Murattal + Mujawwad), Minshawi, Ghamdi, Al-Shatri, Muaiqly, Shuraim
-- **ASR:** [`tarteel-ai/whisper-base-ar-quran`](https://huggingface.co/tarteel-ai/whisper-base-ar-quran) via HuggingFace Inference API — Whisper fine-tuned on Quran recitation
-- **Diff:** Arabic-normalized LCS word alignment (`src/lib/diff.ts`)
+- **Quran text & audio:** Quran.com API v4 + qurancdn.com audio files (with word-level segments)
+- **ASR:** browser-native [Web Speech API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Speech_API) (`ar-SA`) — no server, no API keys
+- **Diff:** Arabic-normalized LCS word alignment in `src/lib/diff.ts`
+- **Player:** custom `PlayerStore` (`src/lib/playerStore.ts`) + React `useSyncExternalStore` hooks so only the active ayah re-renders on each frame
 
 ## Getting started
 
 ```bash
-cp .env.local.example .env.local
-# Add your HuggingFace token to HF_API_KEY in .env.local
-# Get one at https://huggingface.co/settings/tokens
-
 npm install
 npm run dev
 ```
 
-Open <http://localhost:3000>.
+Open <http://localhost:3000>. No env vars needed.
+
+Recite mode requires a Chromium-based browser (Chrome, Edge, Brave, Arc). Firefox and Safari don't ship Web Speech API; playback and word highlighting still work there.
 
 ## Roadmap
 
-- **Phase 1 (current)** — Hafs only. Surah/ayah browser, reciter picker + playback, mic record → word-level diff.
+- **Phase 1 (current)** — Hafs only. Surah/ayah browser, reciter playback with word highlighting, recite + diff.
 - **Phase 2** — Tajweed heuristics (madd duration, waqf compliance, ghunna). Supabase auth + per-user progress.
 - **Phase 3** — Multi-Qira'at: Warsh (Nafi'), Qalun (Nafi'), Al-Duri (Abu Amr) text overlays + reciters per Riwayah.
 - **Phase 4** — Hifz mode: spaced repetition over ayat/juz, streaks, weakest-ayah surfacing, blind-recite mode.
@@ -36,13 +46,12 @@ Open <http://localhost:3000>.
 
 - **Green** — recited correctly
 - **Amber (dotted underline)** — expected word not heard (missed)
-- **Red** — wrong word substituted (hover for what was heard)
+- **Red** — wrong word substituted (hover for what the recognizer heard)
 - **Strikethrough** — extra word inserted that wasn't in the ayah
 
-The diff strips Arabic diacritics (tashkeel) and normalizes letter forms before matching, so different fonts/orthographies of the same word still count as correct.
+The diff strips Arabic diacritics (tashkeel) and normalizes letter forms before matching, so different orthographies of the same word still count as correct.
 
 ## Acknowledgements
 
-- The team behind [Tarteel AI](https://www.tarteel.ai/) for open-sourcing their Whisper-Quran model
-- [quran.com](https://quran.com) and [everyayah.com](https://everyayah.com) for the free APIs and recitation archives
-- The reciters themselves — may Allah accept from them
+- [quran.com](https://quran.com) and [qurancdn.com](https://api.qurancdn.com) for the free text + audio APIs with word-level timings
+- The reciters whose recordings power the listening side — may Allah accept from them
