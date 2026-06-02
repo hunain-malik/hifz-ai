@@ -1,36 +1,48 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Hifz AI
 
-## Getting Started
+A Quran memorization and recitation-practice web app. Pick any ayah, listen to a prominent reciter, recite into your mic, and get word-level feedback from an AI model fine-tuned on Quran recitation.
 
-First, run the development server:
+> **Not a replacement for a qualified teacher.** AI cannot judge tajweed at phoneme level. Use this to drill word accuracy and as a recitation companion alongside a real `mu'allim`.
+
+## Stack
+
+- **Next.js 16** (App Router) + TypeScript + Tailwind v4
+- **Quran text:** [quran.com API v4](https://api-docs.quran.com/) — Uthmani script, Hafs (phase 1)
+- **Reciter audio:** [everyayah.com](https://everyayah.com/) — Mishary, Sudais, Husary (Murattal + Mujawwad), Minshawi, Ghamdi, Al-Shatri, Muaiqly, Shuraim
+- **ASR:** [`tarteel-ai/whisper-base-ar-quran`](https://huggingface.co/tarteel-ai/whisper-base-ar-quran) via HuggingFace Inference API — Whisper fine-tuned on Quran recitation
+- **Diff:** Arabic-normalized LCS word alignment (`src/lib/diff.ts`)
+
+## Getting started
 
 ```bash
+cp .env.local.example .env.local
+# Add your HuggingFace token to HF_API_KEY in .env.local
+# Get one at https://huggingface.co/settings/tokens
+
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open <http://localhost:3000>.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Roadmap
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **Phase 1 (current)** — Hafs only. Surah/ayah browser, reciter picker + playback, mic record → word-level diff.
+- **Phase 2** — Tajweed heuristics (madd duration, waqf compliance, ghunna). Supabase auth + per-user progress.
+- **Phase 3** — Multi-Qira'at: Warsh (Nafi'), Qalun (Nafi'), Al-Duri (Abu Amr) text overlays + reciters per Riwayah.
+- **Phase 4** — Hifz mode: spaced repetition over ayat/juz, streaks, weakest-ayah surfacing, blind-recite mode.
 
-## Learn More
+## Word-diff legend
 
-To learn more about Next.js, take a look at the following resources:
+- **Green** — recited correctly
+- **Amber (dotted underline)** — expected word not heard (missed)
+- **Red** — wrong word substituted (hover for what was heard)
+- **Strikethrough** — extra word inserted that wasn't in the ayah
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The diff strips Arabic diacritics (tashkeel) and normalizes letter forms before matching, so different fonts/orthographies of the same word still count as correct.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Acknowledgements
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- The team behind [Tarteel AI](https://www.tarteel.ai/) for open-sourcing their Whisper-Quran model
+- [quran.com](https://quran.com) and [everyayah.com](https://everyayah.com) for the free APIs and recitation archives
+- The reciters themselves — may Allah accept from them
