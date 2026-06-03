@@ -15,14 +15,23 @@ type RecState =
   | { kind: "result"; tokens: DiffToken[]; transcript: string }
   | { kind: "error"; message: string };
 
+export type ContinuousOverride =
+  | { kind: "recording" }
+  | { kind: "transcribing" }
+  | { kind: "result"; transcript: string };
+
 export function AyahRow({
   verse,
   registry,
   hasNext,
+  continuousOverride = null,
+  continuousActive = false,
 }: {
   verse: Verse;
   registry: ReciteRegistry;
   hasNext: boolean;
+  continuousOverride?: ContinuousOverride | null;
+  continuousActive?: boolean;
 }) {
   const { store, audioStatus } = usePlayer();
   const [rec, setRec] = useState<RecState>({ kind: "idle" });
@@ -35,6 +44,16 @@ export function AyahRow({
     [verse.text_uthmani]
   );
   const activeWord = useWordIndexFor(verse.verse_key);
+
+  const continuousTokens = useMemo(
+    () =>
+      continuousOverride?.kind === "result"
+        ? diffRecitation(verse.text_uthmani, continuousOverride.transcript)
+        : null,
+    [continuousOverride, verse.text_uthmani]
+  );
+
+  const isContinuousActive = continuousOverride?.kind === "recording";
 
   useEffect(
     () => () => {
@@ -136,9 +155,11 @@ export function AyahRow({
       data-verse-key={verse.verse_key}
       data-page-number={verse.page_number}
       className={`rounded-lg border bg-white dark:bg-stone-900 p-4 transition-colors ${
-        activeWord !== null
-          ? "border-emerald-400 dark:border-emerald-700 shadow-sm"
-          : "border-stone-200 dark:border-stone-800"
+        isContinuousActive
+          ? "border-indigo-500 dark:border-indigo-500 shadow-md ring-2 ring-indigo-200 dark:ring-indigo-900/60"
+          : activeWord !== null
+            ? "border-emerald-400 dark:border-emerald-700 shadow-sm"
+            : "border-stone-200 dark:border-stone-800"
       }`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
@@ -162,7 +183,27 @@ export function AyahRow({
           >
             ▶ Listen
           </button>
-          {rec.kind === "recording" ? (
+          {continuousActive ? (
+            <span
+              className={`text-xs rounded-md px-2.5 py-1 font-medium ${
+                continuousOverride?.kind === "recording"
+                  ? "bg-indigo-600 text-white animate-pulse"
+                  : continuousOverride?.kind === "transcribing"
+                    ? "border border-stone-300 dark:border-stone-700 text-stone-500"
+                    : continuousOverride?.kind === "result"
+                      ? "bg-emerald-600 text-white"
+                      : "border border-stone-300 dark:border-stone-700 text-stone-400"
+              }`}
+            >
+              {continuousOverride?.kind === "recording"
+                ? "🎙 Recording…"
+                : continuousOverride?.kind === "transcribing"
+                  ? "Transcribing…"
+                  : continuousOverride?.kind === "result"
+                    ? "✓ Done"
+                    : "Queued"}
+            </span>
+          ) : rec.kind === "recording" ? (
             <button
               type="button"
               onClick={stopRecite}
@@ -212,7 +253,14 @@ export function AyahRow({
         })}
       </p>
 
-      {rec.kind === "recording" && (
+      {continuousOverride?.kind === "result" && continuousTokens && (
+        <Feedback
+          tokens={continuousTokens}
+          transcript={continuousOverride.transcript}
+          onReset={() => {}}
+        />
+      )}
+      {!continuousOverride && rec.kind === "recording" && (
         <p className="mt-3 text-xs text-stone-500 dark:text-stone-400">
           Recording — recite the ayah, then hit Stop.
         </p>
@@ -236,7 +284,7 @@ export function AyahRow({
           Transcribing with Tarteel Whisper…
         </p>
       )}
-      {rec.kind === "result" && (
+      {!continuousOverride && rec.kind === "result" && (
         <Feedback
           tokens={rec.tokens}
           transcript={rec.transcript}

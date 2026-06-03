@@ -3,7 +3,11 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_RECITER_ID, RECITERS, getReciter } from "@/lib/reciters";
 import type { Verse } from "@/lib/quran";
-import { AyahRow } from "./AyahRow";
+import {
+  startContinuousRecite,
+  type ContinuousHandle,
+} from "@/lib/continuousRecite";
+import { AyahRow, type ContinuousOverride } from "./AyahRow";
 import { PageDivider } from "./PageDivider";
 import { ScrollPageIndicator } from "./ScrollPageIndicator";
 import {
@@ -19,6 +23,22 @@ export type ReciteRegistry = {
 };
 
 const STORAGE_KEY = "hifz-ai.reciter";
+
+type ContinuousState = {
+  active: boolean;
+  activeVerse: number | null;
+  transcribing: Set<number>;
+  transcripts: Map<number, string>;
+  errorMessage: string | null;
+};
+
+const EMPTY_CONTINUOUS: ContinuousState = {
+  active: false,
+  activeVerse: null,
+  transcribing: new Set(),
+  transcripts: new Map(),
+  errorMessage: null,
+};
 
 export function SurahView({
   surahId,
@@ -53,26 +73,129 @@ export function SurahView({
         reciteRegistryRef.current.delete(verseNumber);
       };
     }, []),
-    advanceFrom: useCallback((verseNumber: number) => {
-      const next = verseNumber + 1;
-      const start = reciteRegistryRef.current.get(next);
-      if (!start) return;
-      const verseKey = `${surahId}:${next}`;
+    advanceFrom: useCallback(
+      (verseNumber: number) => {
+        const next = verseNumber + 1;
+        const start = reciteRegistryRef.current.get(next);
+        if (!start) return;
+        const verseKey = `${surahId}:${next}`;
+        const el = document.getElementById(`ayah-${verseKey}`);
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+        setTimeout(start, 350);
+      },
+      [surahId]
+    ),
+  };
+
+  const [continuous, setContinuous] =
+    useState<ContinuousState>(EMPTY_CONTINUOUS);
+  const sessionRef = useRef<ContinuousHandle | null>(null);
+
+  useEffect(() => {
+    return () => {
+      sessionRef.current?.stop();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (continuous.activeVerse !== null) {
+      const verseKey = `${surahId}:${continuous.activeVerse}`;
       const el = document.getElementById(`ayah-${verseKey}`);
       if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-      setTimeout(start, 350);
-    }, [surahId]),
-  };
+    }
+  }, [continuous.activeVerse, surahId]);
+
+  async function startContinuous(fromVerseNumber?: number) {
+    if (continuous.active) return;
+    const startIndex = fromVerseNumber
+      ? verses.findIndex((v) => v.verse_number === fromVerseNumber)
+      : 0;
+    setContinuous({
+      ...EMPTY_CONTINUOUS,
+      active: true,
+      activeVerse: verses[Math.max(0, startIndex)]?.verse_number ?? null,
+    });
+    try {
+      const session = await startContinuousRecite({
+        verses,
+        startIndex: Math.max(0, startIndex),
+        callbacks: {
+          onActiveVerseChanged: (verseNumber) =>
+            setContinuous((s) => ({ ...s, activeVerse: verseNumber })),
+          onTranscribing: (verseNumber) =>
+            setContinuous((s) => {
+              const next = new Set(s.transcribing);
+              next.add(verseNumber);
+              return { ...s, transcribing: next };
+            }),
+          onResult: (verseNumber, transcript) =>
+            setContinuous((s) => {
+              const nextTranscribing = new Set(s.transcribing);
+              nextTranscribing.delete(verseNumber);
+              const nextTranscripts = new Map(s.transcripts);
+              nextTranscripts.set(verseNumber, transcript);
+              return {
+                ...s,
+                transcribing: nextTranscribing,
+                transcripts: nextTranscripts,
+              };
+            }),
+          onError: (message) =>
+            setContinuous((s) => ({ ...s, errorMessage: message })),
+          onComplete: () =>
+            setContinuous((s) => ({
+              ...s,
+              active: false,
+              activeVerse: null,
+            })),
+        },
+      });
+      sessionRef.current = session;
+    } catch (err) {
+      setContinuous({
+        ...EMPTY_CONTINUOUS,
+        errorMessage:
+          err instanceof Error
+            ? err.message
+            : "Could not start microphone session.",
+      });
+    }
+  }
+
+  function stopContinuous() {
+    sessionRef.current?.stop();
+    sessionRef.current = null;
+  }
+
+  function skipCurrentInContinuous() {
+    sessionRef.current?.skipCurrent();
+  }
+
+  function clearContinuousResults() {
+    setContinuous(EMPTY_CONTINUOUS);
+  }
 
   return (
     <PlayerProvider reciterId={reciter.id} surahId={surahId}>
-      <ControlsBar reciterId={reciterId} onReciter={chooseReciter} />
+      <ControlsBar
+        reciterId={reciterId}
+        onReciter={chooseReciter}
+        continuousActive={continuous.active}
+        continuousActiveVerse={continuous.activeVerse}
+        continuousErrorMessage={continuous.errorMessage}
+        hasContinuousResults={continuous.transcripts.size > 0}
+        onStartContinuous={() => void startContinuous()}
+        onStopContinuous={stopContinuous}
+        onSkipContinuous={skipCurrentInContinuous}
+        onClearContinuous={clearContinuousResults}
+      />
       <ScrollPageIndicator verses={verses} />
       <ol className="flex flex-col gap-3">
         {verses.map((v, i) => {
           const prevPage = verses[i - 1]?.page_number;
           const showDivider =
             prevPage !== undefined && v.page_number !== prevPage;
+          const override = continuousOverrideFor(continuous, v.verse_number);
           return (
             <Fragment key={v.id}>
               {showDivider && <PageDivider page={v.page_number} />}
@@ -80,6 +203,8 @@ export function SurahView({
                 verse={v}
                 registry={registry}
                 hasNext={v.verse_number < lastVerseNumber}
+                continuousOverride={override}
+                continuousActive={continuous.active}
               />
             </Fragment>
           );
@@ -89,12 +214,46 @@ export function SurahView({
   );
 }
 
+function continuousOverrideFor(
+  state: ContinuousState,
+  verseNumber: number
+): ContinuousOverride | null {
+  if (!state.active && state.transcripts.size === 0) return null;
+  if (state.activeVerse === verseNumber) {
+    return { kind: "recording" };
+  }
+  if (state.transcribing.has(verseNumber)) {
+    return { kind: "transcribing" };
+  }
+  const t = state.transcripts.get(verseNumber);
+  if (t !== undefined) {
+    return { kind: "result", transcript: t };
+  }
+  return null;
+}
+
 function ControlsBar({
   reciterId,
   onReciter,
+  continuousActive,
+  continuousActiveVerse,
+  continuousErrorMessage,
+  hasContinuousResults,
+  onStartContinuous,
+  onStopContinuous,
+  onSkipContinuous,
+  onClearContinuous,
 }: {
   reciterId: number;
   onReciter: (id: number) => void;
+  continuousActive: boolean;
+  continuousActiveVerse: number | null;
+  continuousErrorMessage: string | null;
+  hasContinuousResults: boolean;
+  onStartContinuous: () => void;
+  onStopContinuous: () => void;
+  onSkipContinuous: () => void;
+  onClearContinuous: () => void;
 }) {
   const { store, audioStatus, audioError } = usePlayer();
   const isPlaying = useIsPlaying();
@@ -127,7 +286,8 @@ function ControlsBar({
             id="reciter"
             value={reciterId}
             onChange={(e) => onReciter(Number(e.target.value))}
-            className="w-full rounded-md border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 px-3 py-2 text-sm"
+            disabled={continuousActive}
+            className="w-full rounded-md border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 px-3 py-2 text-sm disabled:opacity-50"
           >
             {RECITERS.map((r) => (
               <option key={r.id} value={r.id}>
@@ -140,10 +300,10 @@ function ControlsBar({
             {reciter.arabicName}
           </p>
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="flex flex-wrap gap-2 shrink-0">
           <button
             type="button"
-            disabled={audioStatus !== "ready"}
+            disabled={audioStatus !== "ready" || continuousActive}
             onClick={() => {
               if (isPlaying) store.togglePause();
               else if (activeKey) store.togglePause();
@@ -165,10 +325,57 @@ function ControlsBar({
             onClick={() => store.stop()}
             className="rounded-md border border-stone-300 dark:border-stone-700 px-3 py-2 text-sm hover:bg-stone-100 dark:hover:bg-stone-800 disabled:opacity-40"
           >
-            ⏹ Stop
+            ⏹ Stop audio
           </button>
+          {continuousActive ? (
+            <>
+              <button
+                type="button"
+                onClick={onSkipContinuous}
+                className="rounded-md border border-stone-300 dark:border-stone-700 px-3 py-2 text-sm hover:bg-stone-100 dark:hover:bg-stone-800"
+                title="Force advance to the next ayah"
+              >
+                ⏭ Next ayah
+              </button>
+              <button
+                type="button"
+                onClick={onStopContinuous}
+                className="rounded-md bg-red-600 text-white px-3 py-2 text-sm font-medium hover:bg-red-700"
+              >
+                ⏹ Stop reciting
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={onStartContinuous}
+              className="rounded-md bg-indigo-600 text-white px-3 py-2 text-sm font-medium hover:bg-indigo-700"
+              title="Recite continuously — the system auto-advances on natural pauses"
+            >
+              🎙 Continuous recite
+            </button>
+          )}
+          {hasContinuousResults && !continuousActive && (
+            <button
+              type="button"
+              onClick={onClearContinuous}
+              className="rounded-md border border-stone-300 dark:border-stone-700 px-3 py-2 text-sm hover:bg-stone-100 dark:hover:bg-stone-800"
+            >
+              Clear results
+            </button>
+          )}
         </div>
       </div>
+      {continuousActive && (
+        <p className="text-xs text-indigo-700 dark:text-indigo-300 mt-2">
+          🎙 Listening{continuousActiveVerse !== null ? ` — ayah ${continuousActiveVerse}` : ""}. Recite naturally; the system advances when you pause for ~1.3s.
+        </p>
+      )}
+      {continuousErrorMessage && (
+        <p className="text-xs text-red-600 dark:text-red-400 mt-2">
+          {continuousErrorMessage}
+        </p>
+      )}
       {audioStatus === "error" && (
         <p className="text-xs text-red-600 dark:text-red-400 mt-2">
           Audio load failed: {audioError}
