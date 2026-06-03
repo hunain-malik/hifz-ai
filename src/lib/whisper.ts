@@ -85,7 +85,8 @@ export async function transcribe(
 ): Promise<string> {
   const pipe = await loadWhisper(options?.onStatus);
   const audioData = await blobToMono16k(audioBlob);
-  const out = await pipe(audioData, {
+  const normalized = peakNormalize(audioData);
+  const out = await pipe(normalized, {
     language: "ar",
     task: "transcribe",
     chunk_length_s: 30,
@@ -116,7 +117,8 @@ async function runWithTimings(
   pipe: Pipeline,
   audioData: Float32Array
 ): Promise<TranscriptionResult> {
-  const out = await pipe(audioData, {
+  const normalized = peakNormalize(audioData);
+  const out = await pipe(normalized, {
     language: "ar",
     task: "transcribe",
     chunk_length_s: 30,
@@ -133,6 +135,23 @@ async function runWithTimings(
     words.push({ text: t, start, end });
   }
   return { text, words };
+}
+
+/** Scale audio so its peak is around 0.7. Helps Whisper on quiet recordings
+ *  without amplifying when the audio is already loud enough. Leaves true
+ *  silence alone so it doesn't blow up the noise floor. */
+function peakNormalize(audio: Float32Array): Float32Array {
+  let peak = 0;
+  for (let i = 0; i < audio.length; i++) {
+    const abs = Math.abs(audio[i]);
+    if (abs > peak) peak = abs;
+  }
+  if (peak < 0.001) return audio; // basically silent — don't amplify noise
+  if (peak >= 0.7) return audio; // already loud enough
+  const scale = 0.7 / peak;
+  const out = new Float32Array(audio.length);
+  for (let i = 0; i < audio.length; i++) out[i] = audio[i] * scale;
+  return out;
 }
 
 async function blobToMono16k(blob: Blob): Promise<Float32Array> {

@@ -155,13 +155,17 @@ export function SurahView({
       });
       return;
     }
-    setContinuous((s) => ({ ...s, phase: "calibrating", modelProgress: 100 }));
+    setContinuous((s) => ({ ...s, modelProgress: 100 }));
     try {
       const session = await startContinuousRecite({
         verses,
         startIndex: Math.max(0, startIndex),
         liveHighlights: continuous.liveHighlights,
         callbacks: {
+          onCalibrationStart: () =>
+            setContinuous((s) => ({ ...s, phase: "calibrating" })),
+          onCalibrationComplete: () =>
+            setContinuous((s) => ({ ...s, phase: "listening" })),
           onActiveVerseChanged: (verseNumber) =>
             setContinuous((s) => ({
               ...s,
@@ -514,11 +518,23 @@ function ControlsBar({
 
       {(continuousPhase === "calibrating" ||
         continuousPhase === "listening") && (
-        <div className="mt-3 rounded-md border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 p-3">
+        <div
+          className={`mt-3 rounded-md border p-3 ${
+            continuousPhase === "calibrating"
+              ? "border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40"
+              : "border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40"
+          }`}
+        >
           <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-            <p className="text-xs font-medium text-indigo-900 dark:text-indigo-200">
+            <p
+              className={`text-xs font-semibold ${
+                continuousPhase === "calibrating"
+                  ? "text-amber-900 dark:text-amber-200"
+                  : "text-indigo-900 dark:text-indigo-200"
+              }`}
+            >
               {continuousPhase === "calibrating"
-                ? "📊 Calibrating ambient noise — stay silent for a moment…"
+                ? "🤫 STAY SILENT — calibrating to your mic + room (~0.7s)"
                 : `🎙 Listening · ayah ${continuousActiveVerse ?? "?"} · pause ~0.9s to advance`}
             </p>
             <p className="text-[10px] text-indigo-700 dark:text-indigo-300 tabular-nums">
