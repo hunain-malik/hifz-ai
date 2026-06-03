@@ -249,6 +249,16 @@ export function SurahView({
     setContinuous(EMPTY_CONTINUOUS);
   }
 
+  function clearContinuousResultForVerse(verseNumber: number) {
+    setContinuous((s) => {
+      const nextResults = new Map(s.results);
+      const nextErrors = new Map(s.errors);
+      nextResults.delete(verseNumber);
+      nextErrors.delete(verseNumber);
+      return { ...s, results: nextResults, errors: nextErrors };
+    });
+  }
+
   const hasResults =
     continuous.results.size > 0 || continuous.errors.size > 0;
   const isActive = continuous.phase !== "off";
@@ -291,6 +301,7 @@ export function SurahView({
                 hasNext={v.verse_number < lastVerseNumber}
                 continuousOverride={override}
                 continuousActive={isActive}
+                onClearContinuousResult={clearContinuousResultForVerse}
               />
             </Fragment>
           );

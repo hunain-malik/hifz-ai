@@ -651,3 +651,101 @@ export function buildFeedbackRendering(
   flushExtras();
   return parts;
 }
+
+// ── Word-level rendering (preserves Arabic cursive joins) ──────────────
+// Each word is kept as a single span; status is aggregated from the letter
+// diff so colors still come from the per-letter analysis but visual layout
+// stays word-by-word like the original Uthmani text.
+
+export type WordStatus =
+  | "correct"
+  | "wrong-marks"
+  | "wrong-letter"
+  | "missing"
+  | "partial";
+
+export type WordRenderPart =
+  | { kind: "space" }
+  | {
+      kind: "word";
+      text: string;
+      status: WordStatus;
+      letterTokens: LetterDiffToken[];
+    }
+  | { kind: "extra"; text: string; tokens: LetterDiffToken[] };
+
+function aggregateStatus(tokens: LetterDiffToken[]): WordStatus {
+  if (tokens.length === 0) return "correct";
+  if (tokens.every((t) => t.status === "correct")) return "correct";
+  if (tokens.some((t) => t.status === "wrong-letter")) return "wrong-letter";
+  if (tokens.some((t) => t.status === "missing")) {
+    return tokens.some((t) => t.status === "correct") ? "partial" : "missing";
+  }
+  if (tokens.some((t) => t.status === "wrong-marks")) return "wrong-marks";
+  return "correct";
+}
+
+export function buildWordFeedbackRendering(
+  expectedRaw: string,
+  actualRaw: string
+): WordRenderPart[] {
+  const expectedGraphemes = parseGraphemes(expectedRaw);
+  const diff = diffGraphemes(expectedRaw, actualRaw);
+
+  const parts: WordRenderPart[] = [];
+  let diffIdx = 0;
+  let currentText = "";
+  let currentTokens: LetterDiffToken[] = [];
+
+  function flushExtras() {
+    const extras: LetterDiffToken[] = [];
+    while (diffIdx < diff.length && diff[diffIdx].status === "extra") {
+      extras.push(diff[diffIdx]);
+      diffIdx++;
+    }
+    if (extras.length > 0) {
+      parts.push({
+        kind: "extra",
+        text: extras.map((t) => t.actual?.raw ?? "").join(""),
+        tokens: extras,
+      });
+    }
+  }
+
+  function flushWord() {
+    if (currentText.length > 0 || currentTokens.length > 0) {
+      parts.push({
+        kind: "word",
+        text: currentText,
+        status: aggregateStatus(currentTokens),
+        letterTokens: currentTokens,
+      });
+      currentText = "";
+      currentTokens = [];
+    }
+  }
+
+  for (const g of expectedGraphemes) {
+    if (g.letter === " ") {
+      flushExtras();
+      flushWord();
+      parts.push({ kind: "space" });
+      continue;
+    }
+    flushExtras();
+    currentText += g.raw;
+    if (diffIdx < diff.length) {
+      currentTokens.push(diff[diffIdx]);
+      diffIdx++;
+    } else {
+      currentTokens.push({
+        expected: g,
+        actual: null,
+        status: "missing",
+      });
+    }
+  }
+  flushExtras();
+  flushWord();
+  return parts;
+}

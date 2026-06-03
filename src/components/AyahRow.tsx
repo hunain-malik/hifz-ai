@@ -10,10 +10,11 @@ import {
   type DiffToken,
 } from "@/lib/diff";
 import {
-  buildFeedbackRendering,
+  buildWordFeedbackRendering,
   diffGraphemes,
   letterAccuracy,
   summarizeLetterDiff,
+  type WordStatus,
 } from "@/lib/arabicGraphemes";
 import {
   transcribeWithTimings,
@@ -61,12 +62,14 @@ export function AyahRow({
   hasNext,
   continuousOverride = null,
   continuousActive = false,
+  onClearContinuousResult,
 }: {
   verse: Verse;
   registry: ReciteRegistry;
   hasNext: boolean;
   continuousOverride?: ContinuousOverride | null;
   continuousActive?: boolean;
+  onClearContinuousResult?: (verseNumber: number) => void;
 }) {
   const { store, audioStatus, surahAudio } = usePlayer();
   const [rec, setRec] = useState<RecState>({ kind: "idle" });
@@ -124,18 +127,18 @@ export function AyahRow({
     return null;
   }, [continuousOverride, continuousTokens, rec]);
 
-  // Inline letter-level feedback rendering — applied directly to the main
-  // ayah display, replacing the word-level render when no playback is active
-  // and a transcript is available. Avoids duplicating the ayah text below.
-  const renderParts = useMemo(
+  // Word-level feedback rendering keeps each word as one connected span so
+  // Arabic cursive joins render correctly; status colors come from the
+  // letter-level analysis aggregated up to the word.
+  const wordRenderParts = useMemo(
     () =>
       replayResult
-        ? buildFeedbackRendering(verse.text_uthmani, replayResult.transcript)
+        ? buildWordFeedbackRendering(verse.text_uthmani, replayResult.transcript)
         : null,
     [replayResult, verse.text_uthmani]
   );
   const showInlineFeedback =
-    !!renderParts && activeWord === null && replayWordIdx < 0;
+    !!wordRenderParts && activeWord === null && replayWordIdx < 0;
 
   // Run DTW timing analysis (sheikh vs user) when we have a result + audio
   useEffect(() => {
@@ -370,62 +373,31 @@ export function AyahRow({
       </div>
 
       <p className="arabic">
-        {showInlineFeedback && renderParts
-          ? renderParts.map((part, i) => {
+        {showInlineFeedback && wordRenderParts
+          ? wordRenderParts.map((part, i) => {
               if (part.kind === "space") return <span key={i}> </span>;
               if (part.kind === "extra") {
                 return (
                   <span
                     key={i}
                     className="arabic-word bg-stone-200 dark:bg-stone-800 text-stone-500 dark:text-stone-500 line-through opacity-70"
-                    title={`Extra: you said ${part.tokens.map((t) => t.actual?.raw ?? "").join("")}`}
+                    title={`Extra: you said ${part.text}`}
                   >
-                    {part.tokens.map((t) => t.actual?.raw ?? "").join("")}
+                    {part.text}
                   </span>
                 );
               }
-              const t = part.token;
-              const display = t.expected?.raw ?? t.actual?.raw ?? "";
-              if (t.status === "correct") {
-                return (
-                  <span
-                    key={i}
-                    className="arabic-word bg-emerald-100 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-100"
-                    title={t.feedback ?? ""}
-                  >
-                    {display}
-                  </span>
-                );
-              }
-              if (t.status === "wrong-marks") {
-                return (
-                  <span
-                    key={i}
-                    className="arabic-word bg-amber-200 dark:bg-amber-900/70 text-amber-950 dark:text-amber-100 ring-1 ring-amber-400 dark:ring-amber-700"
-                    title={t.feedback ?? "Right letter, wrong tashkeel"}
-                  >
-                    {display}
-                  </span>
-                );
-              }
-              if (t.status === "wrong-letter") {
-                return (
-                  <span
-                    key={i}
-                    className="arabic-word bg-red-200 dark:bg-red-900/70 text-red-950 dark:text-red-100 ring-1 ring-red-400 dark:ring-red-700"
-                    title={t.feedback ?? "Wrong letter"}
-                  >
-                    {display}
-                  </span>
-                );
-              }
+              const title = part.letterTokens
+                .filter((t) => t.feedback)
+                .map((t) => t.feedback)
+                .join(" · ") || labelForStatus(part.status);
               return (
                 <span
                   key={i}
-                  className="arabic-word bg-orange-100 dark:bg-orange-950/60 text-orange-900 dark:text-orange-200 underline decoration-dotted decoration-orange-500"
-                  title="You didn't say this letter"
+                  className={`arabic-word ${classForWordStatus(part.status)}`}
+                  title={title}
                 >
-                  {display}
+                  {part.text}
                 </span>
               );
             })
@@ -488,7 +460,7 @@ export function AyahRow({
           Transcribing with Tarteel Whisper…
         </p>
       )}
-      {replayResult && (
+      {replayResult && !continuousActive && (
         <Feedback
           tokens={replayResult.tokens}
           transcript={replayResult.transcript}
@@ -501,7 +473,9 @@ export function AyahRow({
           onReplayWordIdxChange={setReplayWordIdx}
           onPlaySheikh={playSheikh}
           onReset={
-            continuousOverride ? () => {} : () => setRec({ kind: "idle" })
+            continuousOverride && onClearContinuousResult
+              ? () => onClearContinuousResult(verse.verse_number)
+              : () => setRec({ kind: "idle" })
           }
           onAdvance={
             !continuousOverride && hasNext
@@ -744,6 +718,36 @@ function pickMimeType(): string | undefined {
     "audio/ogg;codecs=opus",
   ];
   return candidates.find((c) => MediaRecorder.isTypeSupported(c));
+}
+
+function classForWordStatus(status: WordStatus): string {
+  switch (status) {
+    case "correct":
+      return "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-100";
+    case "wrong-marks":
+      return "bg-amber-200 dark:bg-amber-900/70 text-amber-950 dark:text-amber-100 ring-1 ring-amber-400 dark:ring-amber-700";
+    case "wrong-letter":
+      return "bg-red-200 dark:bg-red-900/70 text-red-950 dark:text-red-100 ring-1 ring-red-400 dark:ring-red-700";
+    case "missing":
+      return "bg-orange-100 dark:bg-orange-950/60 text-orange-900 dark:text-orange-200 underline decoration-dotted decoration-orange-500";
+    case "partial":
+      return "bg-yellow-100 dark:bg-yellow-950/60 text-yellow-900 dark:text-yellow-200 underline decoration-dotted decoration-yellow-500";
+  }
+}
+
+function labelForStatus(status: WordStatus): string {
+  switch (status) {
+    case "correct":
+      return "Correct";
+    case "wrong-marks":
+      return "Right letters, wrong tashkeel";
+    case "wrong-letter":
+      return "Wrong letter substitution";
+    case "missing":
+      return "You didn't say this word";
+    case "partial":
+      return "Part of the word was missed";
+  }
 }
 
 function hasArabicLetter(token: string): boolean {
