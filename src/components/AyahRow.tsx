@@ -77,8 +77,13 @@ export function AyahRow({
   const [timingReport, setTimingReport] = useState<TimingReport | null>(null);
   const [timingPending, setTimingPending] = useState(false);
 
+  // Filter out tokens that are pure waqf/typographic marks (e.g. the bare ۚ
+  // jeem stop sign that the Uthmani text has separated by whitespace). The
+  // sheikh's per-word segment data counts only real words, so without this
+  // filter the highlight indices drift past stop marks.
   const words = useMemo(
-    () => verse.text_uthmani.trim().split(/\s+/),
+    () =>
+      verse.text_uthmani.trim().split(/\s+/).filter(hasArabicLetter),
     [verse.text_uthmani]
   );
   const activeWord = useWordIndexFor(verse.verse_key);
@@ -731,6 +736,22 @@ function pickMimeType(): string | undefined {
     "audio/ogg;codecs=opus",
   ];
   return candidates.find((c) => MediaRecorder.isTypeSupported(c));
+}
+
+function hasArabicLetter(token: string): boolean {
+  for (const ch of token) {
+    const code = ch.codePointAt(0);
+    if (code === undefined) continue;
+    // Basic Arabic letters U+0621..U+064A and the extended Quranic letters
+    // U+0671..U+06D3 (covers ٱ alif wasla, ۚ-adjacent letters, etc.)
+    if (
+      (code >= 0x0621 && code <= 0x064a) ||
+      (code >= 0x0671 && code <= 0x06d3)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function TimingPanel({
