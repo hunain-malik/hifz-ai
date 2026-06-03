@@ -52,6 +52,7 @@ export async function startContinuousRecite(opts: {
   const startIndex = opts.startIndex ?? 0;
   const SILENCE_DURATION_MS = opts.silenceDurationMs ?? 900;
   const MIN_SEGMENT_MS = opts.minSegmentMs ?? 700;
+  const VOICE_TO_START_MS = 250; // continuous non-silence needed to flip "has spoken"
   const CALIBRATION_MS = 700;
   const MIN_THRESHOLD = 0.015;
   const MAX_THRESHOLD = 0.05;
@@ -166,12 +167,16 @@ export async function startContinuousRecite(opts: {
   let segmentStart = 0;
   let transitioning = false;
   let rafHandle: number | null = null;
+  let voiceStreakStart: number | null = null;
+  let hasStartedSpeaking = false;
 
   function startSegment() {
     if (stopped || currentIndex >= opts.verses.length) return;
     chunks = [];
     silenceStart = null;
     segmentStart = performance.now();
+    voiceStreakStart = null;
+    hasStartedSpeaking = false;
     liveSegmentSampleStart = totalSamples;
     const mime = pickMimeType();
     const r = new MediaRecorder(
@@ -215,6 +220,9 @@ export async function startContinuousRecite(opts: {
         } else {
           finalize();
         }
+      } else {
+        // External stop — clean up; don't transcribe partial recording.
+        finalize();
       }
       transitioning = false;
     };
@@ -238,6 +246,12 @@ export async function startContinuousRecite(opts: {
     if (transitioning || !recorder || recorder.state !== "recording") return;
 
     if (isSilent) {
+      // Reset the running voice streak — speech isn't sustained right now
+      voiceStreakStart = null;
+      // Only start counting silence-to-advance AFTER the user has actually
+      // begun reciting in this segment. Otherwise dead-air after a transition
+      // (or any ambient quiet before they start) advances prematurely.
+      if (!hasStartedSpeaking) return;
       if (silenceStart === null) silenceStart = now;
       else if (
         now - silenceStart > SILENCE_DURATION_MS &&
@@ -248,6 +262,12 @@ export async function startContinuousRecite(opts: {
       }
     } else {
       silenceStart = null;
+      // Need a sustained run of non-silence (~250 ms) to count as "user
+      // started reciting." A single noisy frame doesn't flip the flag.
+      if (voiceStreakStart === null) voiceStreakStart = now;
+      else if (now - voiceStreakStart >= VOICE_TO_START_MS) {
+        hasStartedSpeaking = true;
+      }
     }
   }
 
