@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Amiri_Quran } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
+import { ModelPreloader } from "@/components/ModelPreloader";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -39,12 +40,13 @@ export default function RootLayout({
             </p>
           </div>
         </header>
+        <ModelPreloader />
         <main className="flex-1 w-full max-w-6xl mx-auto px-4 py-6">
           {children}
         </main>
         <footer className="border-t border-stone-200 dark:border-stone-800 text-xs text-stone-500 dark:text-stone-400">
           <div className="max-w-6xl mx-auto px-4 py-4">
-            Text + audio from quran.com / qurancdn.com · Recitation recognition runs in your browser via Web Speech API
+            Text + audio from quran.com / qurancdn.com · Recitation recognition runs entirely in your browser via Tarteel Whisper (ONNX)
           </div>
         </footer>
       </body>
