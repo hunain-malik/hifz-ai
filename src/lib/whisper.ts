@@ -113,28 +113,83 @@ export async function transcribeFloat32WithTimings(
   return runWithTimings(cached, audioData);
 }
 
+// `wordTimingsSupported` is set to false on first failure so we don't keep
+// re-trying the expensive path for the rest of the session. Many community
+// ONNX exports of Whisper (including the Tarteel tiny build) skip the
+// cross-attentions that Transformers.js needs for word-level timestamps.
+let wordTimingsSupported = true;
+
 async function runWithTimings(
   pipe: Pipeline,
   audioData: Float32Array
 ): Promise<TranscriptionResult> {
   const normalized = peakNormalize(audioData);
+  const durationSec = audioData.length / 16000;
+
+  if (wordTimingsSupported) {
+    try {
+      const out = await pipe(normalized, {
+        language: "ar",
+        task: "transcribe",
+        chunk_length_s: 30,
+        return_timestamps: "word",
+      });
+      const result = Array.isArray(out) ? out[0] : out;
+      const text = (result?.text ?? "").trim();
+      const words: WordTiming[] = [];
+      for (const chunk of result?.chunks ?? []) {
+        const t = (chunk.text ?? "").trim();
+        if (!t) continue;
+        const [start, end] = chunk.timestamp;
+        if (start === null || end === null) continue;
+        words.push({ text: t, start, end });
+      }
+      if (words.length > 0) return { text, words };
+      // Word path returned no usable chunks; fall through to synthesized timings
+      return { text, words: synthesizeWordTimings(text, durationSec) };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (
+        msg.toLowerCase().includes("cross attentions") ||
+        msg.toLowerCase().includes("output_attentions")
+      ) {
+        wordTimingsSupported = false;
+      } else {
+        throw err;
+      }
+    }
+  }
+
   const out = await pipe(normalized, {
     language: "ar",
     task: "transcribe",
     chunk_length_s: 30,
-    return_timestamps: "word",
   });
   const result = Array.isArray(out) ? out[0] : out;
   const text = (result?.text ?? "").trim();
-  const words: WordTiming[] = [];
-  for (const chunk of result?.chunks ?? []) {
-    const t = (chunk.text ?? "").trim();
-    if (!t) continue;
-    const [start, end] = chunk.timestamp;
-    if (start === null || end === null) continue;
-    words.push({ text: t, start, end });
-  }
-  return { text, words };
+  return { text, words: synthesizeWordTimings(text, durationSec) };
+}
+
+/** When the ONNX model doesn't expose cross-attentions for word timestamps,
+ *  fall back to evenly distributing the recognized words across the audio
+ *  duration. Not phoneme-accurate, but plenty good enough for follow-along
+ *  replay highlighting and "you're around here" live indicators. */
+function synthesizeWordTimings(
+  text: string,
+  durationSec: number
+): WordTiming[] {
+  const tokens = text.split(/\s+/).filter((t) => t.length > 0);
+  if (tokens.length === 0 || durationSec <= 0) return [];
+  const perWord = durationSec / tokens.length;
+  return tokens.map((token, i) => ({
+    text: token,
+    start: i * perWord,
+    end: (i + 1) * perWord,
+  }));
+}
+
+export function hasNativeWordTimings(): boolean {
+  return wordTimingsSupported;
 }
 
 /** Scale audio so its peak is around 0.7. Helps Whisper on quiet recordings
