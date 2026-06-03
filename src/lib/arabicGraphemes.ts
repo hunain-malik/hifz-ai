@@ -150,6 +150,129 @@ function letterPair(expected: string, actual: string): string | null {
   return LETTER_TIPS[key] ?? null;
 }
 
+// ── Tajweed tolerance ───────────────────────────────────────────────────
+// Tajweed rules change how text is recited vs how it's spelled. The diff
+// alone treats the spelling as ground truth, which misreads correct
+// recitation as wrong. These post-processing rules forgive specific cases.
+
+const SUKUN = "ْ";
+const SHADDA = "ّ";
+
+// Qalqalah letters — when held with sukoon or at word end, they get a
+// bouncing release that acoustically overlaps with similar voiceless/voiced
+// counterparts. Whisper commonly confuses these.
+const QALQALAH = new Set(["ق", "ط", "ب", "ج", "د"]);
+// Substitutions that are ASR-confusion-acceptable on qalqalah letters at
+// word end (similar place of articulation). The Quran-correct letter is on
+// the left; we accept the right as Whisper's alternative.
+const QALQALAH_ACCEPT: Record<string, string[]> = {
+  "د": ["ت"], // bouncy dental ↔ dental stop
+  "ت": ["د"],
+  "ب": ["ف", "پ"],
+  "ج": ["ش"],
+  "ق": ["ك"],
+};
+
+// Yarmaloon (يرملون) — the 6 letters noon sakinah merges with via idgham.
+const YARMALOON = new Set(["ي", "ر", "م", "ل", "و", "ن"]);
+
+/** Post-process the grapheme diff with three tajweed/recitation rules.
+ *  Each rule re-classifies certain tokens from wrong/missing → correct with
+ *  an explanatory feedback string the user can hover. */
+function tajweedTolerate(
+  tokens: LetterDiffToken[],
+  wordEndIndices: Set<number>
+): LetterDiffToken[] {
+  const out: LetterDiffToken[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+
+    // Rule 1: Idgham (noon sakinah merger).
+    // Expected has bare noon (no vowel = sakinah by Mushaf convention) that's
+    // marked missing. If the very next aligned expected letter is in the
+    // yarmaloon set AND the actual side of that token has shadda, the user
+    // correctly performed idgham (the noon doesn't get pronounced, the next
+    // letter is doubled).
+    if (t.status === "missing" && t.expected?.letter === "ن") {
+      const next = tokens[i + 1];
+      if (
+        next &&
+        next.expected &&
+        YARMALOON.has(canonicalLetter(next.expected.letter)) &&
+        (next.actual?.marks.includes(SHADDA) ||
+          next.expected.marks.includes(SHADDA))
+      ) {
+        out.push({
+          ...t,
+          status: "correct",
+          feedback: `Idgham: noon sakinah merged into ${labelLetter(next.expected.letter)} (correct tajweed)`,
+        });
+        continue;
+      }
+    }
+
+    // Rule 2: Qalqalah substitution at word end.
+    // د/ت etc. at end of word with sukoon (or final position) are acoustic
+    // neighbors. If Whisper transcribes the substitute, accept it.
+    if (t.status === "wrong-letter" && t.expected && t.actual) {
+      const eLet = t.expected.letter;
+      if (
+        QALQALAH.has(eLet) &&
+        QALQALAH_ACCEPT[eLet]?.includes(t.actual.letter) &&
+        (t.expected.marks.includes(SUKUN) || wordEndIndices.has(i))
+      ) {
+        out.push({
+          ...t,
+          status: "correct",
+          feedback: `Qalqalah ${labelLetter(eLet)} at word end — acoustic ASR variance is acceptable`,
+        });
+        continue;
+      }
+    }
+
+    // Rule 3: Missing shaddah only.
+    // Shaddah is acoustically subtle; Whisper drops it often even when the
+    // recitation is right. If the only mark difference is a missing shaddah
+    // (everything else matches), accept it.
+    if (t.status === "wrong-marks" && t.expected && t.actual) {
+      const expectedHasShadda = t.expected.marks.includes(SHADDA);
+      const actualHasShadda = t.actual.marks.includes(SHADDA);
+      if (expectedHasShadda && !actualHasShadda) {
+        const eRest = t.expected.marks.filter((m) => m !== SHADDA);
+        const aRest = t.actual.marks.filter((m) => m !== SHADDA);
+        if (sameMarks(eRest, aRest)) {
+          out.push({
+            ...t,
+            status: "correct",
+            feedback: "Shaddah (doubled letter) — accepted as a soft acoustic miss",
+          });
+          continue;
+        }
+      }
+    }
+
+    out.push(t);
+  }
+  return out;
+}
+
+/** Compute the indices in the (space-stripped) expected sequence that fall
+ *  on a word boundary, so qalqalah-at-word-end rules can fire correctly. */
+function computeWordEndIndices(expectedRaw: string): Set<number> {
+  const set = new Set<number>();
+  const all = parseGraphemes(expectedRaw);
+  let nonSpaceIdx = 0;
+  for (let k = 0; k < all.length; k++) {
+    if (all[k].letter === " ") {
+      if (nonSpaceIdx > 0) set.add(nonSpaceIdx - 1);
+    } else {
+      nonSpaceIdx++;
+    }
+  }
+  if (nonSpaceIdx > 0) set.add(nonSpaceIdx - 1);
+  return set;
+}
+
 // ── Letter-level diff ──────────────────────────────────────────────────
 
 export type LetterDiffStatus =
@@ -230,7 +353,9 @@ export function diffGraphemes(
     j--;
   }
   out.reverse();
-  return collapseAdjacentToWrongLetter(out);
+  const collapsed = collapseAdjacentToWrongLetter(out);
+  const wordEnds = computeWordEndIndices(expectedRaw);
+  return tajweedTolerate(collapsed, wordEnds);
 }
 
 function sameMarks(a: string[], b: string[]): boolean {
