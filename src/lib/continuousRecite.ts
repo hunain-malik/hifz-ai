@@ -38,12 +38,14 @@ export async function startContinuousRecite(opts: {
   startIndex?: number;
   silenceDurationMs?: number;
   minSegmentMs?: number;
+  sessionCancelMs?: number;
   callbacks: ContinuousCallbacks;
 }): Promise<ContinuousHandle> {
   const startIndex = opts.startIndex ?? 0;
   const SILENCE_DURATION_MS = opts.silenceDurationMs ?? 900;
   const MIN_SEGMENT_MS = opts.minSegmentMs ?? 700;
   const VOICE_TO_START_MS = 250;
+  const SESSION_CANCEL_SILENCE_MS = opts.sessionCancelMs ?? 2000;
   const CALIBRATION_MS = 700;
   const MIN_THRESHOLD = 0.015;
   const MAX_THRESHOLD = 0.05;
@@ -126,6 +128,10 @@ export async function startContinuousRecite(opts: {
   let rafHandle: number | null = null;
   let voiceStreakStart: number | null = null;
   let hasStartedSpeaking = false;
+  // Session-level silence tracker — persists across segment boundaries so
+  // total continuous silence (including transitions) can trigger auto-cancel.
+  let sessionSilenceStart: number | null = null;
+  let hasSpokenInSession = false;
 
   function startSegment() {
     if (stopped || currentIndex >= opts.verses.length) return;
@@ -198,6 +204,22 @@ export async function startContinuousRecite(opts: {
     const isSilent = rms < silenceThreshold;
     opts.callbacks.onMicLevel?.(rms, silenceThreshold, isSilent);
 
+    // Session-level silence tracking (runs regardless of segment state so it
+    // spans the brief transitioning window between ayat).
+    if (isSilent) {
+      if (sessionSilenceStart === null) sessionSilenceStart = now;
+    } else {
+      sessionSilenceStart = null;
+    }
+    if (
+      hasSpokenInSession &&
+      sessionSilenceStart !== null &&
+      now - sessionSilenceStart > SESSION_CANCEL_SILENCE_MS
+    ) {
+      stop();
+      return;
+    }
+
     if (transitioning || !recorder || recorder.state !== "recording") return;
 
     if (isSilent) {
@@ -216,6 +238,7 @@ export async function startContinuousRecite(opts: {
       if (voiceStreakStart === null) voiceStreakStart = now;
       else if (now - voiceStreakStart >= VOICE_TO_START_MS) {
         hasStartedSpeaking = true;
+        hasSpokenInSession = true;
       }
     }
   }

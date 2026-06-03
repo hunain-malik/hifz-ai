@@ -124,6 +124,19 @@ export function AyahRow({
     return null;
   }, [continuousOverride, continuousTokens, rec]);
 
+  // Inline letter-level feedback rendering — applied directly to the main
+  // ayah display, replacing the word-level render when no playback is active
+  // and a transcript is available. Avoids duplicating the ayah text below.
+  const renderParts = useMemo(
+    () =>
+      replayResult
+        ? buildFeedbackRendering(verse.text_uthmani, replayResult.transcript)
+        : null,
+    [replayResult, verse.text_uthmani]
+  );
+  const showInlineFeedback =
+    !!renderParts && activeWord === null && replayWordIdx < 0;
+
   // Run DTW timing analysis (sheikh vs user) when we have a result + audio
   useEffect(() => {
     setTimingReport(null);
@@ -357,26 +370,85 @@ export function AyahRow({
       </div>
 
       <p className="arabic">
-        {words.map((w, i) => {
-          const wordPos = i + 1;
-          const isActive = activeWord === wordPos;
-          const isReplayActive = replayWordIdx === i;
-          return (
-            <span
-              key={i}
-              className={`arabic-word ${
-                isReplayActive
-                  ? "bg-indigo-200 dark:bg-indigo-900/70 text-indigo-950 dark:text-indigo-100"
-                  : isActive
-                    ? "bg-emerald-200 dark:bg-emerald-900/70 text-emerald-950 dark:text-emerald-100"
-                    : ""
-              }`}
-            >
-              {w}
-              {i < words.length - 1 ? " " : ""}
-            </span>
-          );
-        })}
+        {showInlineFeedback && renderParts
+          ? renderParts.map((part, i) => {
+              if (part.kind === "space") return <span key={i}> </span>;
+              if (part.kind === "extra") {
+                return (
+                  <span
+                    key={i}
+                    className="arabic-word bg-stone-200 dark:bg-stone-800 text-stone-500 dark:text-stone-500 line-through opacity-70"
+                    title={`Extra: you said ${part.tokens.map((t) => t.actual?.raw ?? "").join("")}`}
+                  >
+                    {part.tokens.map((t) => t.actual?.raw ?? "").join("")}
+                  </span>
+                );
+              }
+              const t = part.token;
+              const display = t.expected?.raw ?? t.actual?.raw ?? "";
+              if (t.status === "correct") {
+                return (
+                  <span
+                    key={i}
+                    className="arabic-word bg-emerald-100 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-100"
+                    title={t.feedback ?? ""}
+                  >
+                    {display}
+                  </span>
+                );
+              }
+              if (t.status === "wrong-marks") {
+                return (
+                  <span
+                    key={i}
+                    className="arabic-word bg-amber-200 dark:bg-amber-900/70 text-amber-950 dark:text-amber-100 ring-1 ring-amber-400 dark:ring-amber-700"
+                    title={t.feedback ?? "Right letter, wrong tashkeel"}
+                  >
+                    {display}
+                  </span>
+                );
+              }
+              if (t.status === "wrong-letter") {
+                return (
+                  <span
+                    key={i}
+                    className="arabic-word bg-red-200 dark:bg-red-900/70 text-red-950 dark:text-red-100 ring-1 ring-red-400 dark:ring-red-700"
+                    title={t.feedback ?? "Wrong letter"}
+                  >
+                    {display}
+                  </span>
+                );
+              }
+              return (
+                <span
+                  key={i}
+                  className="arabic-word bg-orange-100 dark:bg-orange-950/60 text-orange-900 dark:text-orange-200 underline decoration-dotted decoration-orange-500"
+                  title="You didn't say this letter"
+                >
+                  {display}
+                </span>
+              );
+            })
+          : words.map((w, i) => {
+              const wordPos = i + 1;
+              const isActive = activeWord === wordPos;
+              const isReplayActive = replayWordIdx === i;
+              return (
+                <span
+                  key={i}
+                  className={`arabic-word ${
+                    isReplayActive
+                      ? "bg-indigo-200 dark:bg-indigo-900/70 text-indigo-950 dark:text-indigo-100"
+                      : isActive
+                        ? "bg-emerald-200 dark:bg-emerald-900/70 text-emerald-950 dark:text-emerald-100"
+                        : ""
+                  }`}
+                >
+                  {w}
+                  {i < words.length - 1 ? " " : ""}
+                </span>
+              );
+            })}
       </p>
 
       {continuousOverride?.kind === "result" &&
@@ -492,10 +564,6 @@ function Feedback({
   const letterIssues = useMemo(
     () => summarizeLetterDiff(letterTokens, { limit: 8 }),
     [letterTokens]
-  );
-  const renderParts = useMemo(
-    () => buildFeedbackRendering(expectedText, transcript),
-    [expectedText, transcript]
   );
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -631,66 +699,6 @@ function Feedback({
           )}
         </div>
       </div>
-      <p className="arabic">
-        {renderParts.map((part, i) => {
-          if (part.kind === "space") return <span key={i}> </span>;
-          if (part.kind === "extra") {
-            return (
-              <span
-                key={i}
-                className="arabic-word bg-stone-200 dark:bg-stone-800 text-stone-500 dark:text-stone-500 line-through opacity-70"
-                title={`Extra: you said ${part.tokens.map((t) => t.actual?.raw ?? "").join("")}`}
-              >
-                {part.tokens.map((t) => t.actual?.raw ?? "").join("")}
-              </span>
-            );
-          }
-          const t = part.token;
-          const display = t.expected?.raw ?? t.actual?.raw ?? "";
-          if (t.status === "correct") {
-            return (
-              <span
-                key={i}
-                className="arabic-word bg-emerald-100 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-100"
-              >
-                {display}
-              </span>
-            );
-          }
-          if (t.status === "wrong-marks") {
-            return (
-              <span
-                key={i}
-                className="arabic-word bg-amber-200 dark:bg-amber-900/70 text-amber-950 dark:text-amber-100 ring-1 ring-amber-400 dark:ring-amber-700"
-                title={t.feedback ?? "Right letter, wrong tashkeel"}
-              >
-                {display}
-              </span>
-            );
-          }
-          if (t.status === "wrong-letter") {
-            return (
-              <span
-                key={i}
-                className="arabic-word bg-red-200 dark:bg-red-900/70 text-red-950 dark:text-red-100 ring-1 ring-red-400 dark:ring-red-700"
-                title={t.feedback ?? "Wrong letter"}
-              >
-                {display}
-              </span>
-            );
-          }
-          // missing
-          return (
-            <span
-              key={i}
-              className="arabic-word bg-orange-100 dark:bg-orange-950/60 text-orange-900 dark:text-orange-200 underline decoration-dotted decoration-orange-500"
-              title="You didn't say this letter"
-            >
-              {display}
-            </span>
-          );
-        })}
-      </p>
       {letterIssues.length > 0 && (
         <div className="mt-3 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 p-3">
           <p className="text-xs uppercase tracking-wider text-amber-800 dark:text-amber-300 mb-1.5 font-semibold">
