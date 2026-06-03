@@ -18,7 +18,8 @@ type RecState =
 export type ContinuousOverride =
   | { kind: "recording" }
   | { kind: "transcribing" }
-  | { kind: "result"; transcript: string };
+  | { kind: "result"; transcript: string }
+  | { kind: "error"; message: string };
 
 export function AyahRow({
   verse,
@@ -183,7 +184,7 @@ export function AyahRow({
           >
             ▶ Listen
           </button>
-          {continuousActive ? (
+          {continuousActive || continuousOverride ? (
             <span
               className={`text-xs rounded-md px-2.5 py-1 font-medium ${
                 continuousOverride?.kind === "recording"
@@ -192,7 +193,9 @@ export function AyahRow({
                     ? "border border-stone-300 dark:border-stone-700 text-stone-500"
                     : continuousOverride?.kind === "result"
                       ? "bg-emerald-600 text-white"
-                      : "border border-stone-300 dark:border-stone-700 text-stone-400"
+                      : continuousOverride?.kind === "error"
+                        ? "bg-red-600 text-white"
+                        : "border border-stone-300 dark:border-stone-700 text-stone-400"
               }`}
             >
               {continuousOverride?.kind === "recording"
@@ -201,7 +204,9 @@ export function AyahRow({
                   ? "Transcribing…"
                   : continuousOverride?.kind === "result"
                     ? "✓ Done"
-                    : "Queued"}
+                    : continuousOverride?.kind === "error"
+                      ? "Error"
+                      : "Queued"}
             </span>
           ) : rec.kind === "recording" ? (
             <button
@@ -253,12 +258,25 @@ export function AyahRow({
         })}
       </p>
 
-      {continuousOverride?.kind === "result" && continuousTokens && (
-        <Feedback
-          tokens={continuousTokens}
-          transcript={continuousOverride.transcript}
-          onReset={() => {}}
-        />
+      {continuousOverride?.kind === "result" && (
+        continuousOverride.transcript.length === 0 ? (
+          <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">
+            Whisper didn&apos;t hear anything for this ayah. The mic may be
+            quiet, the segment may have been too short, or VAD advanced too
+            early.
+          </p>
+        ) : continuousTokens ? (
+          <Feedback
+            tokens={continuousTokens}
+            transcript={continuousOverride.transcript}
+            onReset={() => {}}
+          />
+        ) : null
+      )}
+      {continuousOverride?.kind === "error" && (
+        <p className="mt-3 text-xs text-red-600 dark:text-red-400">
+          {continuousOverride.message}
+        </p>
       )}
       {!continuousOverride && rec.kind === "recording" && (
         <p className="mt-3 text-xs text-stone-500 dark:text-stone-400">

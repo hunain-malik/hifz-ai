@@ -7,6 +7,7 @@ import {
   startContinuousRecite,
   type ContinuousHandle,
 } from "@/lib/continuousRecite";
+import { loadWhisper, type LoadStatus } from "@/lib/whisper";
 import { AyahRow, type ContinuousOverride } from "./AyahRow";
 import { PageDivider } from "./PageDivider";
 import { ScrollPageIndicator } from "./ScrollPageIndicator";
@@ -24,20 +25,34 @@ export type ReciteRegistry = {
 
 const STORAGE_KEY = "hifz-ai.reciter";
 
+type ContinuousPhase = "off" | "preloading" | "calibrating" | "listening";
+
+type MicMeter = {
+  rms: number;
+  threshold: number;
+  isSilent: boolean;
+};
+
 type ContinuousState = {
-  active: boolean;
+  phase: ContinuousPhase;
+  modelProgress: number;
   activeVerse: number | null;
   transcribing: Set<number>;
   transcripts: Map<number, string>;
+  errors: Map<number, string>;
   errorMessage: string | null;
+  meter: MicMeter | null;
 };
 
 const EMPTY_CONTINUOUS: ContinuousState = {
-  active: false,
+  phase: "off",
+  modelProgress: 0,
   activeVerse: null,
   transcribing: new Set(),
   transcripts: new Map(),
+  errors: new Map(),
   errorMessage: null,
+  meter: null,
 };
 
 export function SurahView({
@@ -98,30 +113,50 @@ export function SurahView({
   }, []);
 
   useEffect(() => {
-    if (continuous.activeVerse !== null) {
+    if (continuous.activeVerse !== null && continuous.phase === "listening") {
       const verseKey = `${surahId}:${continuous.activeVerse}`;
       const el = document.getElementById(`ayah-${verseKey}`);
       if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
     }
-  }, [continuous.activeVerse, surahId]);
+  }, [continuous.activeVerse, continuous.phase, surahId]);
 
   async function startContinuous(fromVerseNumber?: number) {
-    if (continuous.active) return;
+    if (continuous.phase !== "off") return;
     const startIndex = fromVerseNumber
       ? verses.findIndex((v) => v.verse_number === fromVerseNumber)
       : 0;
     setContinuous({
       ...EMPTY_CONTINUOUS,
-      active: true,
+      phase: "preloading",
+      modelProgress: 0,
       activeVerse: verses[Math.max(0, startIndex)]?.verse_number ?? null,
     });
+    try {
+      await loadWhisper((status: LoadStatus) => {
+        if (status.kind === "loading") {
+          setContinuous((s) => ({ ...s, modelProgress: status.progress }));
+        }
+      });
+    } catch (err) {
+      setContinuous({
+        ...EMPTY_CONTINUOUS,
+        errorMessage:
+          err instanceof Error ? err.message : "Model failed to load.",
+      });
+      return;
+    }
+    setContinuous((s) => ({ ...s, phase: "calibrating", modelProgress: 100 }));
     try {
       const session = await startContinuousRecite({
         verses,
         startIndex: Math.max(0, startIndex),
         callbacks: {
           onActiveVerseChanged: (verseNumber) =>
-            setContinuous((s) => ({ ...s, activeVerse: verseNumber })),
+            setContinuous((s) => ({
+              ...s,
+              activeVerse: verseNumber,
+              phase: verseNumber !== null ? "listening" : s.phase,
+            })),
           onTranscribing: (verseNumber) =>
             setContinuous((s) => {
               const next = new Set(s.transcribing);
@@ -140,14 +175,34 @@ export function SurahView({
                 transcripts: nextTranscripts,
               };
             }),
-          onError: (message) =>
-            setContinuous((s) => ({ ...s, errorMessage: message })),
+          onError: (verseNumber, message) =>
+            setContinuous((s) => {
+              const nextErrors = new Map(s.errors);
+              const nextTranscribing = new Set(s.transcribing);
+              if (verseNumber !== null) {
+                nextErrors.set(verseNumber, message);
+                nextTranscribing.delete(verseNumber);
+              }
+              return {
+                ...s,
+                errors: nextErrors,
+                transcribing: nextTranscribing,
+                errorMessage: message,
+              };
+            }),
           onComplete: () =>
             setContinuous((s) => ({
               ...s,
-              active: false,
+              phase: "off",
               activeVerse: null,
+              meter: null,
             })),
+          onMicLevel: (rms, threshold, isSilent) =>
+            setContinuous((s) =>
+              s.phase === "off"
+                ? s
+                : { ...s, meter: { rms, threshold, isSilent } }
+            ),
         },
       });
       sessionRef.current = session;
@@ -175,15 +230,24 @@ export function SurahView({
     setContinuous(EMPTY_CONTINUOUS);
   }
 
+  const hasResults =
+    continuous.transcripts.size > 0 || continuous.errors.size > 0;
+  const isActive = continuous.phase !== "off";
+
   return (
     <PlayerProvider reciterId={reciter.id} surahId={surahId}>
       <ControlsBar
         reciterId={reciterId}
         onReciter={chooseReciter}
-        continuousActive={continuous.active}
+        continuousActive={isActive}
+        continuousPhase={continuous.phase}
+        continuousModelProgress={continuous.modelProgress}
         continuousActiveVerse={continuous.activeVerse}
         continuousErrorMessage={continuous.errorMessage}
-        hasContinuousResults={continuous.transcripts.size > 0}
+        continuousMeter={continuous.meter}
+        continuousTranscribingCount={continuous.transcribing.size}
+        continuousResultCount={continuous.transcripts.size}
+        hasContinuousResults={hasResults}
         onStartContinuous={() => void startContinuous()}
         onStopContinuous={stopContinuous}
         onSkipContinuous={skipCurrentInContinuous}
@@ -204,7 +268,7 @@ export function SurahView({
                 registry={registry}
                 hasNext={v.verse_number < lastVerseNumber}
                 continuousOverride={override}
-                continuousActive={continuous.active}
+                continuousActive={isActive}
               />
             </Fragment>
           );
@@ -218,8 +282,10 @@ function continuousOverrideFor(
   state: ContinuousState,
   verseNumber: number
 ): ContinuousOverride | null {
-  if (!state.active && state.transcripts.size === 0) return null;
-  if (state.activeVerse === verseNumber) {
+  if (state.phase === "off" && state.transcripts.size === 0 && state.errors.size === 0) {
+    return null;
+  }
+  if (state.activeVerse === verseNumber && state.phase === "listening") {
     return { kind: "recording" };
   }
   if (state.transcribing.has(verseNumber)) {
@@ -229,6 +295,10 @@ function continuousOverrideFor(
   if (t !== undefined) {
     return { kind: "result", transcript: t };
   }
+  const err = state.errors.get(verseNumber);
+  if (err !== undefined) {
+    return { kind: "error", message: err };
+  }
   return null;
 }
 
@@ -236,8 +306,13 @@ function ControlsBar({
   reciterId,
   onReciter,
   continuousActive,
+  continuousPhase,
+  continuousModelProgress,
   continuousActiveVerse,
   continuousErrorMessage,
+  continuousMeter,
+  continuousTranscribingCount,
+  continuousResultCount,
   hasContinuousResults,
   onStartContinuous,
   onStopContinuous,
@@ -247,8 +322,13 @@ function ControlsBar({
   reciterId: number;
   onReciter: (id: number) => void;
   continuousActive: boolean;
+  continuousPhase: ContinuousPhase;
+  continuousModelProgress: number;
   continuousActiveVerse: number | null;
   continuousErrorMessage: string | null;
+  continuousMeter: MicMeter | null;
+  continuousTranscribingCount: number;
+  continuousResultCount: number;
   hasContinuousResults: boolean;
   onStartContinuous: () => void;
   onStopContinuous: () => void;
@@ -332,7 +412,8 @@ function ControlsBar({
               <button
                 type="button"
                 onClick={onSkipContinuous}
-                className="rounded-md border border-stone-300 dark:border-stone-700 px-3 py-2 text-sm hover:bg-stone-100 dark:hover:bg-stone-800"
+                disabled={continuousPhase !== "listening"}
+                className="rounded-md border border-stone-300 dark:border-stone-700 px-3 py-2 text-sm hover:bg-stone-100 dark:hover:bg-stone-800 disabled:opacity-40"
                 title="Force advance to the next ayah"
               >
                 ⏭ Next ayah
@@ -366,11 +447,42 @@ function ControlsBar({
           )}
         </div>
       </div>
-      {continuousActive && (
-        <p className="text-xs text-indigo-700 dark:text-indigo-300 mt-2">
-          🎙 Listening{continuousActiveVerse !== null ? ` — ayah ${continuousActiveVerse}` : ""}. Recite naturally; the system advances when you pause for ~1.3s.
-        </p>
+
+      {continuousPhase === "preloading" && (
+        <div className="mt-3 rounded-md border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 p-3">
+          <p className="text-xs font-medium text-indigo-900 dark:text-indigo-200 mb-1.5">
+            First-time setup — downloading Tarteel Whisper (~93 MB, cached after).
+          </p>
+          <div className="h-1.5 w-full rounded-full bg-indigo-100 dark:bg-indigo-900/60 overflow-hidden">
+            <div
+              className="h-full bg-indigo-600 dark:bg-indigo-500 transition-[width] duration-200"
+              style={{ width: `${continuousModelProgress}%` }}
+            />
+          </div>
+          <p className="text-[10px] text-indigo-700 dark:text-indigo-300 mt-1 tabular-nums">
+            {continuousModelProgress}% — once loaded, every recite is instant
+          </p>
+        </div>
       )}
+
+      {(continuousPhase === "calibrating" ||
+        continuousPhase === "listening") && (
+        <div className="mt-3 rounded-md border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <p className="text-xs font-medium text-indigo-900 dark:text-indigo-200">
+              {continuousPhase === "calibrating"
+                ? "📊 Calibrating ambient noise — stay silent for a moment…"
+                : `🎙 Listening · ayah ${continuousActiveVerse ?? "?"} · pause ~0.9s to advance`}
+            </p>
+            <p className="text-[10px] text-indigo-700 dark:text-indigo-300 tabular-nums">
+              {continuousResultCount} done ·{" "}
+              {continuousTranscribingCount} transcribing
+            </p>
+          </div>
+          <MicLevelMeter meter={continuousMeter} />
+        </div>
+      )}
+
       {continuousErrorMessage && (
         <p className="text-xs text-red-600 dark:text-red-400 mt-2">
           {continuousErrorMessage}
@@ -381,6 +493,32 @@ function ControlsBar({
           Audio load failed: {audioError}
         </p>
       )}
+    </div>
+  );
+}
+
+function MicLevelMeter({ meter }: { meter: MicMeter | null }) {
+  if (!meter) {
+    return (
+      <div className="h-2 w-full rounded-full bg-stone-200 dark:bg-stone-800 overflow-hidden" />
+    );
+  }
+  const SCALE = 0.15;
+  const levelPct = Math.min(100, (meter.rms / SCALE) * 100);
+  const thresholdPct = Math.min(100, (meter.threshold / SCALE) * 100);
+  return (
+    <div className="relative h-2 w-full rounded-full bg-stone-200 dark:bg-stone-800 overflow-hidden">
+      <div
+        className={`absolute top-0 left-0 h-full transition-[width] duration-100 ${
+          meter.isSilent ? "bg-stone-400" : "bg-emerald-500"
+        }`}
+        style={{ width: `${levelPct}%` }}
+      />
+      <div
+        className="absolute top-[-2px] bottom-[-2px] w-0.5 bg-red-600"
+        style={{ left: `${thresholdPct}%` }}
+        title="Silence threshold"
+      />
     </div>
   );
 }

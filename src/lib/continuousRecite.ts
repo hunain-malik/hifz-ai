@@ -5,8 +5,9 @@ export type ContinuousCallbacks = {
   onActiveVerseChanged: (verseNumber: number | null) => void;
   onTranscribing: (verseNumber: number) => void;
   onResult: (verseNumber: number, transcript: string) => void;
-  onError: (message: string) => void;
+  onError: (verseNumber: number | null, message: string) => void;
   onComplete: () => void;
+  onMicLevel?: (level: number, threshold: number, isSilent: boolean) => void;
 };
 
 export type ContinuousHandle = {
@@ -28,17 +29,20 @@ function pickMimeType(): string | undefined {
 export async function startContinuousRecite(opts: {
   verses: Verse[];
   startIndex?: number;
-  silenceRmsThreshold?: number;
   silenceDurationMs?: number;
   minSegmentMs?: number;
   callbacks: ContinuousCallbacks;
 }): Promise<ContinuousHandle> {
   const startIndex = opts.startIndex ?? 0;
-  const SILENCE_THRESHOLD = opts.silenceRmsThreshold ?? 0.015;
-  const SILENCE_DURATION_MS = opts.silenceDurationMs ?? 1300;
-  const MIN_SEGMENT_MS = opts.minSegmentMs ?? 800;
+  const SILENCE_DURATION_MS = opts.silenceDurationMs ?? 900;
+  const MIN_SEGMENT_MS = opts.minSegmentMs ?? 700;
+  const CALIBRATION_MS = 600;
+  const MIN_THRESHOLD = 0.012;
+  const THRESHOLD_MULTIPLIER = 2.2;
 
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false },
+  });
 
   const AudioCtx =
     window.AudioContext ??
@@ -49,6 +53,7 @@ export async function startContinuousRecite(opts: {
   const analyser = audioContext.createAnalyser();
   analyser.fftSize = 1024;
   source.connect(analyser);
+  const timeData = new Uint8Array(analyser.frequencyBinCount);
 
   let currentIndex = startIndex;
   let recorder: MediaRecorder | null = null;
@@ -58,6 +63,20 @@ export async function startContinuousRecite(opts: {
   let stopped = false;
   let transitioning = false;
   let rafHandle: number | null = null;
+
+  let silenceThreshold = MIN_THRESHOLD;
+  let ambientSamples: number[] = [];
+  let calibratedAt: number | null = null;
+
+  function computeRms(): number {
+    analyser.getByteTimeDomainData(timeData);
+    let sumSquares = 0;
+    for (let i = 0; i < timeData.length; i++) {
+      const v = (timeData[i] - 128) / 128;
+      sumSquares += v * v;
+    }
+    return Math.sqrt(sumSquares / timeData.length);
+  }
 
   function startSegment() {
     if (stopped || currentIndex >= opts.verses.length) return;
@@ -84,11 +103,13 @@ export async function startContinuousRecite(opts: {
           .then((text) =>
             opts.callbacks.onResult(myVerseNumber, text.trim())
           )
-          .catch((err) =>
+          .catch((err) => {
             opts.callbacks.onError(
+              myVerseNumber,
               err instanceof Error ? err.message : "Transcription failed."
-            )
-          );
+            );
+            opts.callbacks.onResult(myVerseNumber, "");
+          });
 
         currentIndex++;
         if (currentIndex < opts.verses.length) {
@@ -112,19 +133,33 @@ export async function startContinuousRecite(opts: {
   function tick() {
     if (stopped) return;
     rafHandle = requestAnimationFrame(tick);
+
+    const rms = computeRms();
+    const now = performance.now();
+
+    if (calibratedAt === null) {
+      ambientSamples.push(rms);
+      if (now - segmentStart < CALIBRATION_MS) {
+        opts.callbacks.onMicLevel?.(rms, silenceThreshold, false);
+        return;
+      }
+      ambientSamples.sort((a, b) => a - b);
+      const median =
+        ambientSamples[Math.floor(ambientSamples.length / 2)] ?? MIN_THRESHOLD;
+      silenceThreshold = Math.max(
+        MIN_THRESHOLD,
+        median * THRESHOLD_MULTIPLIER
+      );
+      ambientSamples = [];
+      calibratedAt = now;
+    }
+
+    const isSilent = rms < silenceThreshold;
+    opts.callbacks.onMicLevel?.(rms, silenceThreshold, isSilent);
+
     if (transitioning || !recorder || recorder.state !== "recording") return;
 
-    const buffer = new Uint8Array(analyser.frequencyBinCount);
-    analyser.getByteTimeDomainData(buffer);
-    let sumSquares = 0;
-    for (let i = 0; i < buffer.length; i++) {
-      const v = (buffer[i] - 128) / 128;
-      sumSquares += v * v;
-    }
-    const rms = Math.sqrt(sumSquares / buffer.length);
-
-    const now = performance.now();
-    if (rms < SILENCE_THRESHOLD) {
+    if (isSilent) {
       if (silenceStart === null) silenceStart = now;
       else if (
         now - silenceStart > SILENCE_DURATION_MS &&
