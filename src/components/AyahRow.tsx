@@ -3,17 +3,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Verse } from "@/lib/quran";
 import { diffRecitation, accuracyScore, type DiffToken } from "@/lib/diff";
-import {
-  isSpeechRecognitionAvailable,
-  startRecognition,
-  type Recognizer,
-} from "@/lib/speechRecognition";
+import { transcribe, type LoadStatus } from "@/lib/whisper";
 import { usePlayer, useWordIndexFor } from "./PlayerProvider";
 import type { ReciteRegistry } from "./SurahView";
 
 type RecState =
   | { kind: "idle" }
-  | { kind: "listening" }
+  | { kind: "recording" }
+  | { kind: "loading-model"; progress: number }
+  | { kind: "transcribing" }
   | { kind: "result"; tokens: DiffToken[]; transcript: string }
   | { kind: "error"; message: string };
 
@@ -28,7 +26,9 @@ export function AyahRow({
 }) {
   const { store, audioStatus } = usePlayer();
   const [rec, setRec] = useState<RecState>({ kind: "idle" });
-  const recognizerRef = useRef<Recognizer | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const words = useMemo(
     () => verse.text_uthmani.trim().split(/\s+/),
@@ -38,7 +38,12 @@ export function AyahRow({
 
   useEffect(
     () => () => {
-      recognizerRef.current?.abort();
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      try {
+        recorderRef.current?.stop();
+      } catch {
+        // recorder may not be in a stoppable state; ignore
+      }
     },
     []
   );
@@ -53,34 +58,77 @@ export function AyahRow({
     store.playFromVerse(verse.verse_key, { singleVerse: true });
   }
 
-  function startRecite() {
-    if (!isSpeechRecognitionAvailable()) {
+  async function startRecite() {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices) {
       setRec({
         kind: "error",
-        message:
-          "Speech recognition isn't available in this browser. Use Chrome or Edge.",
+        message: "Microphone access isn't available in this browser.",
       });
       return;
     }
-    setRec({ kind: "listening" });
-    recognizerRef.current = startRecognition({
-      lang: "ar-SA",
-      onResult: (transcript) => {
-        const tokens = diffRecitation(verse.text_uthmani, transcript);
-        setRec({ kind: "result", tokens, transcript });
-      },
-      onError: (message) => setRec({ kind: "error", message }),
-      onEnd: () => {
-        recognizerRef.current = null;
-      },
-    });
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mime = pickMimeType();
+      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      chunksRef.current = [];
+      rec.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      rec.onstop = () => {
+        const blob = new Blob(chunksRef.current, {
+          type: rec.mimeType || "audio/webm",
+        });
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        void runTranscription(blob);
+      };
+      recorderRef.current = rec;
+      rec.start();
+      setRec({ kind: "recording" });
+    } catch (err) {
+      setRec({
+        kind: "error",
+        message:
+          err instanceof Error
+            ? err.message
+            : "Could not access microphone. Check permissions.",
+      });
+    }
   }
-
-  startReciteRef.current = startRecite;
 
   function stopRecite() {
-    recognizerRef.current?.stop();
+    try {
+      recorderRef.current?.stop();
+    } catch {
+      // ignore
+    }
   }
+
+  async function runTranscription(blob: Blob) {
+    setRec({ kind: "transcribing" });
+    try {
+      const text = await transcribe(blob, {
+        onStatus: (status: LoadStatus) => {
+          if (status.kind === "loading") {
+            setRec({ kind: "loading-model", progress: status.progress });
+          } else if (status.kind === "ready") {
+            setRec({ kind: "transcribing" });
+          }
+        },
+      });
+      const tokens = diffRecitation(verse.text_uthmani, text);
+      setRec({ kind: "result", tokens, transcript: text });
+    } catch (err) {
+      setRec({
+        kind: "error",
+        message:
+          err instanceof Error ? err.message : "Transcription failed.",
+      });
+    }
+  }
+
+  startReciteRef.current = () => void startRecite();
 
   return (
     <li
@@ -114,7 +162,7 @@ export function AyahRow({
           >
             ▶ Listen
           </button>
-          {rec.kind === "listening" ? (
+          {rec.kind === "recording" ? (
             <button
               type="button"
               onClick={stopRecite}
@@ -122,10 +170,20 @@ export function AyahRow({
             >
               ⏹ Stop
             </button>
+          ) : rec.kind === "loading-model" || rec.kind === "transcribing" ? (
+            <button
+              type="button"
+              disabled
+              className="text-xs rounded-md border border-stone-300 dark:border-stone-700 px-2.5 py-1 opacity-60"
+            >
+              {rec.kind === "loading-model"
+                ? `Loading model… ${rec.progress}%`
+                : "Transcribing…"}
+            </button>
           ) : (
             <button
               type="button"
-              onClick={startRecite}
+              onClick={() => void startRecite()}
               className="text-xs rounded-md bg-emerald-600 text-white px-2.5 py-1 hover:bg-emerald-700"
             >
               🎙 Recite
@@ -154,9 +212,28 @@ export function AyahRow({
         })}
       </p>
 
-      {rec.kind === "listening" && (
+      {rec.kind === "recording" && (
         <p className="mt-3 text-xs text-stone-500 dark:text-stone-400">
-          Listening — recite the ayah, then hit Stop.
+          Recording — recite the ayah, then hit Stop.
+        </p>
+      )}
+      {rec.kind === "loading-model" && (
+        <div className="mt-3">
+          <p className="text-xs text-stone-500 dark:text-stone-400 mb-1">
+            First-time setup — downloading Quran recognition model (~90MB,
+            cached after).
+          </p>
+          <div className="h-1.5 w-full rounded-full bg-stone-200 dark:bg-stone-800 overflow-hidden">
+            <div
+              className="h-full bg-emerald-500 dark:bg-emerald-600 transition-[width] duration-200"
+              style={{ width: `${rec.progress}%` }}
+            />
+          </div>
+        </div>
+      )}
+      {rec.kind === "transcribing" && (
+        <p className="mt-3 text-xs text-stone-500 dark:text-stone-400">
+          Transcribing with Tarteel Whisper…
         </p>
       )}
       {rec.kind === "result" && (
@@ -260,4 +337,15 @@ function Feedback({
       </details>
     </div>
   );
+}
+
+function pickMimeType(): string | undefined {
+  if (typeof MediaRecorder === "undefined") return undefined;
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/mp4",
+    "audio/ogg;codecs=opus",
+  ];
+  return candidates.find((c) => MediaRecorder.isTypeSupported(c));
 }
