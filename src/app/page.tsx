@@ -21,12 +21,12 @@ export default async function Home() {
         <h2 className="text-sm uppercase tracking-wider text-stone-500 dark:text-stone-400 mb-3">
           Surahs
         </h2>
-        <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-stretch">
           {chapters.map((c) => (
-            <li key={c.id}>
+            <li key={c.id} className="flex">
               <Link
                 href={`/surah/${c.id}`}
-                className="block rounded-lg border border-stone-200 dark:border-stone-800 hover:bg-stone-100 dark:hover:bg-stone-900 transition-colors overflow-hidden"
+                className="flex flex-col w-full rounded-lg border border-stone-200 dark:border-stone-800 hover:bg-stone-100 dark:hover:bg-stone-900 transition-colors overflow-hidden"
               >
                 <div className="flex items-center justify-between gap-2 px-3 pt-2.5 pb-1">
                   <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -49,17 +49,15 @@ export default async function Home() {
                     {c.translated_name.name} · {c.verses_count} verses
                   </p>
                 </div>
-                <div className="flex flex-wrap items-stretch gap-0 mt-1.5 border-t border-stone-200 dark:border-stone-800">
-                  <span className="flex-1 min-w-[110px] inline-flex items-center justify-center gap-1 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-900 dark:text-emerald-200 text-sm font-bold px-2 py-1.5 tabular-nums whitespace-nowrap">
+                <div className="mt-auto grid grid-cols-3 gap-0 border-t border-stone-200 dark:border-stone-800">
+                  <span className="inline-flex items-center justify-center gap-1 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-900 dark:text-emerald-200 text-sm font-bold px-2 py-1.5 tabular-nums whitespace-nowrap">
                     📖 {pageLabel(c.pages)}
                   </span>
-                  {juzMap.get(c.id) && (
-                    <span className="flex-1 min-w-[90px] inline-flex items-center justify-center gap-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-900 dark:text-indigo-200 text-sm font-bold px-2 py-1.5 tabular-nums whitespace-nowrap">
-                      📚 {juzLabel(juzMap.get(c.id)!)}
-                    </span>
-                  )}
+                  <span className="inline-flex items-center justify-center gap-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-900 dark:text-indigo-200 text-sm font-bold px-2 py-1.5 tabular-nums whitespace-nowrap border-l border-stone-200 dark:border-stone-800">
+                    {juzMap.get(c.id) ? `📚 ${juzLabel(juzMap.get(c.id)!)}` : ""}
+                  </span>
                   <span
-                    className={`flex-1 min-w-[80px] inline-flex items-center justify-center text-sm font-bold px-2 py-1.5 capitalize whitespace-nowrap ${
+                    className={`inline-flex items-center justify-center text-sm font-bold px-2 py-1.5 capitalize whitespace-nowrap border-l border-stone-200 dark:border-stone-800 ${
                       c.revelation_place === "makkah"
                         ? "bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200"
                         : "bg-sky-100 dark:bg-sky-900/40 text-sky-900 dark:text-sky-200"
