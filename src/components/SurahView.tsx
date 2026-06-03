@@ -8,6 +8,7 @@ import {
   type ContinuousHandle,
 } from "@/lib/continuousRecite";
 import { loadWhisper, type LoadStatus, type WordTiming } from "@/lib/whisper";
+import { getSheikhSurahPCM } from "@/lib/timingAnalysis";
 import { AyahRow, type ContinuousOverride } from "./AyahRow";
 import { PageDivider } from "./PageDivider";
 import { ScrollPageIndicator } from "./ScrollPageIndicator";
@@ -43,26 +44,22 @@ type ContinuousState = {
   phase: ContinuousPhase;
   modelProgress: number;
   activeVerse: number | null;
-  liveWordIdx: number;
   transcribing: Set<number>;
   results: Map<number, RecitedAyah>;
   errors: Map<number, string>;
   errorMessage: string | null;
   meter: MicMeter | null;
-  liveHighlights: boolean;
 };
 
 const EMPTY_CONTINUOUS: ContinuousState = {
   phase: "off",
   modelProgress: 0,
   activeVerse: null,
-  liveWordIdx: -1,
   transcribing: new Set(),
   results: new Map(),
   errors: new Map(),
   errorMessage: null,
   meter: null,
-  liveHighlights: true,
 };
 
 export function SurahView({
@@ -115,6 +112,7 @@ export function SurahView({
   const [continuous, setContinuous] =
     useState<ContinuousState>(EMPTY_CONTINUOUS);
   const sessionRef = useRef<ContinuousHandle | null>(null);
+  const surahAudioUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -141,6 +139,13 @@ export function SurahView({
       modelProgress: 0,
       activeVerse: verses[Math.max(0, startIndex)]?.verse_number ?? null,
     });
+    // Prefetch the sheikh PCM in parallel with model load so DTW analysis is
+    // instant when the first ayah's transcription completes.
+    if (surahAudioUrlRef.current) {
+      void getSheikhSurahPCM(surahAudioUrlRef.current).catch(() => {
+        // Pacing panel just won't render for that ayah; not fatal.
+      });
+    }
     try {
       await loadWhisper((status: LoadStatus) => {
         if (status.kind === "loading") {
@@ -160,7 +165,6 @@ export function SurahView({
       const session = await startContinuousRecite({
         verses,
         startIndex: Math.max(0, startIndex),
-        liveHighlights: continuous.liveHighlights,
         callbacks: {
           onCalibrationStart: () =>
             setContinuous((s) => ({ ...s, phase: "calibrating" })),
@@ -170,7 +174,6 @@ export function SurahView({
             setContinuous((s) => ({
               ...s,
               activeVerse: verseNumber,
-              liveWordIdx: -1,
               phase: verseNumber !== null ? "listening" : s.phase,
             })),
           onTranscribing: (verseNumber) =>
@@ -219,12 +222,6 @@ export function SurahView({
                 ? s
                 : { ...s, meter: { rms, threshold, isSilent } }
             ),
-          onLiveExpectedWordIdx: (verseNumber, expectedIdx) =>
-            setContinuous((s) =>
-              s.activeVerse === verseNumber
-                ? { ...s, liveWordIdx: expectedIdx }
-                : s
-            ),
         },
       });
       sessionRef.current = session;
@@ -249,11 +246,7 @@ export function SurahView({
   }
 
   function clearContinuousResults() {
-    setContinuous((s) => ({ ...EMPTY_CONTINUOUS, liveHighlights: s.liveHighlights }));
-  }
-
-  function toggleLiveHighlights() {
-    setContinuous((s) => ({ ...s, liveHighlights: !s.liveHighlights }));
+    setContinuous(EMPTY_CONTINUOUS);
   }
 
   const hasResults =
@@ -273,13 +266,14 @@ export function SurahView({
         continuousMeter={continuous.meter}
         continuousTranscribingCount={continuous.transcribing.size}
         continuousResultCount={continuous.results.size}
-        liveHighlights={continuous.liveHighlights}
-        onToggleLiveHighlights={toggleLiveHighlights}
         hasContinuousResults={hasResults}
         onStartContinuous={() => void startContinuous()}
         onStopContinuous={stopContinuous}
         onSkipContinuous={skipCurrentInContinuous}
         onClearContinuous={clearContinuousResults}
+        onSurahAudioUrl={(url) => {
+          surahAudioUrlRef.current = url;
+        }}
       />
       <ScrollPageIndicator verses={verses} />
       <ol className="flex flex-col gap-3">
@@ -314,10 +308,7 @@ function continuousOverrideFor(
     return null;
   }
   if (state.activeVerse === verseNumber && state.phase === "listening") {
-    return {
-      kind: "recording",
-      liveWordIdx: state.liveHighlights ? state.liveWordIdx : -1,
-    };
+    return { kind: "recording" };
   }
   if (state.transcribing.has(verseNumber)) {
     return { kind: "transcribing" };
@@ -349,13 +340,12 @@ function ControlsBar({
   continuousMeter,
   continuousTranscribingCount,
   continuousResultCount,
-  liveHighlights,
-  onToggleLiveHighlights,
   hasContinuousResults,
   onStartContinuous,
   onStopContinuous,
   onSkipContinuous,
   onClearContinuous,
+  onSurahAudioUrl,
 }: {
   reciterId: number;
   onReciter: (id: number) => void;
@@ -367,15 +357,17 @@ function ControlsBar({
   continuousMeter: MicMeter | null;
   continuousTranscribingCount: number;
   continuousResultCount: number;
-  liveHighlights: boolean;
-  onToggleLiveHighlights: () => void;
   hasContinuousResults: boolean;
   onStartContinuous: () => void;
   onStopContinuous: () => void;
   onSkipContinuous: () => void;
   onClearContinuous: () => void;
+  onSurahAudioUrl: (url: string | null) => void;
 }) {
-  const { store, audioStatus, audioError } = usePlayer();
+  const { store, audioStatus, audioError, surahAudio } = usePlayer();
+  useEffect(() => {
+    onSurahAudioUrl(surahAudio?.audioUrl ?? null);
+  }, [surahAudio, onSurahAudioUrl]);
   const isPlaying = useIsPlaying();
   const activeKey = useActiveVerseKey();
   const lastActiveKeyRef = useRef<string | null>(null);
@@ -475,17 +467,6 @@ function ControlsBar({
             >
               🎙 Continuous recite
             </button>
-          )}
-          {!continuousActive && (
-            <label className="inline-flex items-center gap-1.5 text-xs text-stone-600 dark:text-stone-400 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={liveHighlights}
-                onChange={onToggleLiveHighlights}
-                className="h-3.5 w-3.5"
-              />
-              Live word highlight
-            </label>
           )}
           {hasContinuousResults && !continuousActive && (
             <button

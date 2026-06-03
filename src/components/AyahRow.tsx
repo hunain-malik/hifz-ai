@@ -45,7 +45,7 @@ type RecState =
   | { kind: "error"; message: string };
 
 export type ContinuousOverride =
-  | { kind: "recording"; liveWordIdx?: number }
+  | { kind: "recording" }
   | { kind: "transcribing" }
   | {
       kind: "result";
@@ -356,22 +356,15 @@ export function AyahRow({
           const wordPos = i + 1;
           const isActive = activeWord === wordPos;
           const isReplayActive = replayWordIdx === i;
-          const liveIdx =
-            continuousOverride?.kind === "recording"
-              ? (continuousOverride.liveWordIdx ?? -1)
-              : -1;
-          const isLiveActive = liveIdx === i;
           return (
             <span
               key={i}
               className={`arabic-word ${
-                isLiveActive
-                  ? "bg-indigo-300 dark:bg-indigo-800/80 text-indigo-950 dark:text-indigo-50 ring-2 ring-indigo-500"
-                  : isReplayActive
-                    ? "bg-indigo-200 dark:bg-indigo-900/70 text-indigo-950 dark:text-indigo-100"
-                    : isActive
-                      ? "bg-emerald-200 dark:bg-emerald-900/70 text-emerald-950 dark:text-emerald-100"
-                      : ""
+                isReplayActive
+                  ? "bg-indigo-200 dark:bg-indigo-900/70 text-indigo-950 dark:text-indigo-100"
+                  : isActive
+                    ? "bg-emerald-200 dark:bg-emerald-900/70 text-emerald-950 dark:text-emerald-100"
+                    : ""
               }`}
             >
               {w}

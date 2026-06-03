@@ -1,10 +1,5 @@
 import type { Verse } from "./quran";
-import {
-  transcribeFloat32WithTimings,
-  transcribeWithTimings,
-  type WordTiming,
-} from "./whisper";
-import { alignUserToExpected, diffRecitation, tokenize } from "./diff";
+import { transcribeWithTimings, type WordTiming } from "./whisper";
 
 export type ContinuousCallbacks = {
   onCalibrationStart?: () => void;
@@ -20,8 +15,6 @@ export type ContinuousCallbacks = {
   onError: (verseNumber: number | null, message: string) => void;
   onComplete: () => void;
   onMicLevel?: (level: number, threshold: number, isSilent: boolean) => void;
-  /** Live word index in the EXPECTED ayah text being highlighted right now. */
-  onLiveExpectedWordIdx?: (verseNumber: number, expectedIdx: number) => void;
 };
 
 export type ContinuousHandle = {
@@ -45,21 +38,16 @@ export async function startContinuousRecite(opts: {
   startIndex?: number;
   silenceDurationMs?: number;
   minSegmentMs?: number;
-  liveHighlights?: boolean;
-  livePollMs?: number;
   callbacks: ContinuousCallbacks;
 }): Promise<ContinuousHandle> {
   const startIndex = opts.startIndex ?? 0;
   const SILENCE_DURATION_MS = opts.silenceDurationMs ?? 900;
   const MIN_SEGMENT_MS = opts.minSegmentMs ?? 700;
-  const VOICE_TO_START_MS = 250; // continuous non-silence needed to flip "has spoken"
+  const VOICE_TO_START_MS = 250;
   const CALIBRATION_MS = 700;
   const MIN_THRESHOLD = 0.015;
   const MAX_THRESHOLD = 0.05;
   const THRESHOLD_MULTIPLIER = 2.5;
-  const LIVE_POLL_MS = opts.livePollMs ?? 1500;
-  const LIVE_MAX_BUFFER_SEC = 12;
-  const SAMPLE_RATE = 16000;
 
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
@@ -73,7 +61,7 @@ export async function startContinuousRecite(opts: {
     window.AudioContext ??
     (window as unknown as { webkitAudioContext: typeof AudioContext })
       .webkitAudioContext;
-  const audioContext = new AudioCtx({ sampleRate: SAMPLE_RATE });
+  const audioContext = new AudioCtx();
   const source = audioContext.createMediaStreamSource(stream);
   const analyser = audioContext.createAnalyser();
   analyser.fftSize = 1024;
@@ -92,7 +80,7 @@ export async function startContinuousRecite(opts: {
     return Math.sqrt(sumSquares / timeData.length);
   }
 
-  // ── PHASE 1: Calibration (BEFORE MediaRecorder starts) ─────────────────
+  // ── PHASE 1: Calibration ────────────────────────────────────────────
   opts.callbacks.onCalibrationStart?.();
   const silenceThreshold = await new Promise<number>((resolve) => {
     const samples: number[] = [];
@@ -128,38 +116,7 @@ export async function startContinuousRecite(opts: {
     return { stop: () => {}, skipCurrent: () => {} };
   }
 
-  // ── Live PCM ring buffer for streaming transcription (Phase B) ─────────
-  let liveBuffer: Float32Array[] = [];
-  let liveBufferSamples = 0;
-  let liveProcessor: ScriptProcessorNode | null = null;
-  let liveTranscribing = false;
-  let livePollTimer: number | null = null;
-  let liveSegmentSampleStart = 0;
-  let totalSamples = 0;
-
-  if (opts.liveHighlights !== false) {
-    const bufferSize = 4096;
-    liveProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1);
-    liveProcessor.onaudioprocess = (e) => {
-      const data = e.inputBuffer.getChannelData(0);
-      liveBuffer.push(new Float32Array(data));
-      liveBufferSamples += data.length;
-      totalSamples += data.length;
-      const maxSamples = LIVE_MAX_BUFFER_SEC * SAMPLE_RATE;
-      while (liveBufferSamples > maxSamples && liveBuffer.length > 1) {
-        const dropped = liveBuffer.shift()!;
-        liveBufferSamples -= dropped.length;
-        liveSegmentSampleStart = Math.max(
-          0,
-          liveSegmentSampleStart - dropped.length
-        );
-      }
-    };
-    source.connect(liveProcessor);
-    liveProcessor.connect(audioContext.destination);
-  }
-
-  // ── PHASE 2: Recording loop ────────────────────────────────────────────
+  // ── PHASE 2: Recording loop ─────────────────────────────────────────
   let currentIndex = startIndex;
   let recorder: MediaRecorder | null = null;
   let chunks: Blob[] = [];
@@ -177,7 +134,6 @@ export async function startContinuousRecite(opts: {
     segmentStart = performance.now();
     voiceStreakStart = null;
     hasStartedSpeaking = false;
-    liveSegmentSampleStart = totalSamples;
     const mime = pickMimeType();
     const r = new MediaRecorder(
       stream,
@@ -221,7 +177,6 @@ export async function startContinuousRecite(opts: {
           finalize();
         }
       } else {
-        // External stop — clean up; don't transcribe partial recording.
         finalize();
       }
       transitioning = false;
@@ -246,11 +201,7 @@ export async function startContinuousRecite(opts: {
     if (transitioning || !recorder || recorder.state !== "recording") return;
 
     if (isSilent) {
-      // Reset the running voice streak — speech isn't sustained right now
       voiceStreakStart = null;
-      // Only start counting silence-to-advance AFTER the user has actually
-      // begun reciting in this segment. Otherwise dead-air after a transition
-      // (or any ambient quiet before they start) advances prematurely.
       if (!hasStartedSpeaking) return;
       if (silenceStart === null) silenceStart = now;
       else if (
@@ -262,8 +213,6 @@ export async function startContinuousRecite(opts: {
       }
     } else {
       silenceStart = null;
-      // Need a sustained run of non-silence (~250 ms) to count as "user
-      // started reciting." A single noisy frame doesn't flip the flag.
       if (voiceStreakStart === null) voiceStreakStart = now;
       else if (now - voiceStreakStart >= VOICE_TO_START_MS) {
         hasStartedSpeaking = true;
@@ -273,79 +222,10 @@ export async function startContinuousRecite(opts: {
 
   function finalize() {
     if (rafHandle !== null) cancelAnimationFrame(rafHandle);
-    if (livePollTimer !== null) {
-      clearTimeout(livePollTimer);
-      livePollTimer = null;
-    }
-    if (liveProcessor) {
-      liveProcessor.disconnect();
-      liveProcessor.onaudioprocess = null;
-      liveProcessor = null;
-    }
     stream.getTracks().forEach((t) => t.stop());
     if (audioContext.state !== "closed") void audioContext.close();
     opts.callbacks.onActiveVerseChanged(null);
     opts.callbacks.onComplete();
-  }
-
-  async function pollLive() {
-    if (stopped || liveTranscribing) {
-      schedulePoll();
-      return;
-    }
-    if (currentIndex >= opts.verses.length) return;
-    const segmentSamples = totalSamples - liveSegmentSampleStart;
-    if (segmentSamples < SAMPLE_RATE * 0.5) {
-      schedulePoll();
-      return;
-    }
-    const total = liveBufferSamples;
-    const overall = new Float32Array(total);
-    let offset = 0;
-    for (const chunk of liveBuffer) {
-      overall.set(chunk, offset);
-      offset += chunk.length;
-    }
-    const sliceStart = Math.max(0, liveSegmentSampleStart);
-    const segmentAudio = overall.subarray(sliceStart);
-    if (segmentAudio.length < SAMPLE_RATE * 0.5) {
-      schedulePoll();
-      return;
-    }
-    const liveVerseNumber = opts.verses[currentIndex].verse_number;
-    const expectedText = opts.verses[currentIndex].text_uthmani;
-
-    liveTranscribing = true;
-    try {
-      const { text } = await transcribeFloat32WithTimings(
-        new Float32Array(segmentAudio)
-      );
-      if (stopped || liveVerseNumber !== opts.verses[currentIndex].verse_number) {
-        liveTranscribing = false;
-        return;
-      }
-      const tokens = diffRecitation(expectedText, text);
-      const alignment = alignUserToExpected(tokens);
-      const userTokens = tokenize(text);
-      const lastUserIdx = userTokens.length - 1;
-      if (lastUserIdx >= 0 && lastUserIdx < alignment.length) {
-        const expectedIdx = alignment[lastUserIdx];
-        if (expectedIdx >= 0) {
-          opts.callbacks.onLiveExpectedWordIdx?.(liveVerseNumber, expectedIdx);
-        }
-      }
-    } catch {
-      // Live transcription failures are non-fatal; just skip this round
-    }
-    liveTranscribing = false;
-    schedulePoll();
-  }
-
-  function schedulePoll() {
-    if (stopped || !opts.liveHighlights) return;
-    livePollTimer = window.setTimeout(() => {
-      void pollLive();
-    }, LIVE_POLL_MS);
   }
 
   function stop() {
@@ -376,9 +256,6 @@ export async function startContinuousRecite(opts: {
 
   startSegment();
   tick();
-  if (opts.liveHighlights !== false) {
-    schedulePoll();
-  }
 
   return { stop, skipCurrent };
 }
