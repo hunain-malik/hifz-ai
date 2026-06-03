@@ -21,7 +21,7 @@ export default async function Home() {
         <h2 className="text-sm uppercase tracking-wider text-stone-500 dark:text-stone-400 mb-3">
           Surahs
         </h2>
-        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-stretch">
+        <ul className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-stretch">
           {chapters.map((c) => (
             <li key={c.id} className="flex">
               <Link
@@ -49,15 +49,17 @@ export default async function Home() {
                     {c.translated_name.name} · {c.verses_count} verses
                   </p>
                 </div>
-                <div className="mt-auto grid grid-cols-3 gap-0 border-t border-stone-200 dark:border-stone-800">
-                  <span className="inline-flex items-center justify-center gap-1 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-900 dark:text-emerald-200 text-sm font-bold px-2 py-1.5 tabular-nums whitespace-nowrap">
+                <div className="mt-auto flex flex-wrap border-t border-stone-200 dark:border-stone-800">
+                  <span className="flex-1 basis-[160px] inline-flex items-center justify-center gap-1 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-900 dark:text-emerald-200 text-sm font-bold px-3 py-1.5 tabular-nums whitespace-nowrap">
                     📖 {pageLabel(c.pages)}
                   </span>
-                  <span className="inline-flex items-center justify-center gap-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-900 dark:text-indigo-200 text-sm font-bold px-2 py-1.5 tabular-nums whitespace-nowrap border-l border-stone-200 dark:border-stone-800">
-                    {juzMap.get(c.id) ? `📚 ${juzLabel(juzMap.get(c.id)!)}` : ""}
-                  </span>
+                  {juzMap.get(c.id) && (
+                    <span className="flex-1 basis-[120px] inline-flex items-center justify-center gap-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-900 dark:text-indigo-200 text-sm font-bold px-3 py-1.5 tabular-nums whitespace-nowrap">
+                      📚 {juzLabel(juzMap.get(c.id)!)}
+                    </span>
+                  )}
                   <span
-                    className={`inline-flex items-center justify-center text-sm font-bold px-2 py-1.5 capitalize whitespace-nowrap border-l border-stone-200 dark:border-stone-800 ${
+                    className={`flex-1 basis-[100px] inline-flex items-center justify-center text-sm font-bold px-3 py-1.5 capitalize whitespace-nowrap ${
                       c.revelation_place === "makkah"
                         ? "bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200"
                         : "bg-sky-100 dark:bg-sky-900/40 text-sky-900 dark:text-sky-200"

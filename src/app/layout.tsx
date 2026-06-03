@@ -30,7 +30,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
         <header className="border-b border-stone-200 dark:border-stone-800 bg-white/70 dark:bg-stone-950/70 backdrop-blur sticky top-0 z-10">
-          <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+          <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
             <Link href="/" className="font-semibold tracking-tight text-lg">
               Hifz AI
             </Link>
@@ -39,11 +39,11 @@ export default function RootLayout({
             </p>
           </div>
         </header>
-        <main className="flex-1 w-full max-w-6xl mx-auto px-4 py-6">
+        <main className="flex-1 w-full max-w-7xl mx-auto px-4 py-6">
           {children}
         </main>
         <footer className="border-t border-stone-200 dark:border-stone-800 text-xs text-stone-500 dark:text-stone-400">
-          <div className="max-w-6xl mx-auto px-4 py-4">
+          <div className="max-w-7xl mx-auto px-4 py-4">
             Text + audio from quran.com / qurancdn.com · Recitation recognition runs in your browser via Web Speech API
           </div>
         </footer>
