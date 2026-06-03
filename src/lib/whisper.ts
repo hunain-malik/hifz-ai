@@ -1,13 +1,19 @@
 // Tarteel Whisper-base fine-tuned on Quran recitation. Community ONNX export
-// by aaqibhabib at q8 quantization (~98 MB total: 76 MB merged decoder + 22 MB
+// by TMSH75 at q8 quantization (~98 MB total: 76 MB merged decoder + 22 MB
 // encoder). Loaded once per browser tab via @huggingface/transformers; cached
 // in IndexedDB after first download. All inference runs in-browser.
 //
 // The base variant is significantly more accurate than tiny on Quranic Arabic
 // — particularly on short ayat with limited acoustic context (e.g. Al-Ikhlas
 // ayah 2 was a common tiny false-negative).
+//
+// Note: many community exports (including aaqibhabib's) ship a botched
+// generation_config that pins is_multilingual:false, which makes
+// Transformers.js refuse any language= override. TMSH75 ships the bare
+// post-fine-tune config which lets the multilingual encoder do its thing
+// without complaints.
 
-const MODEL_ID = "aaqibhabib/whisper-base-ar-quran-onnx";
+const MODEL_ID = "TMSH75/whisper-base-ar-quran-onnx";
 
 export type LoadStatus =
   | { kind: "idle" }
@@ -92,8 +98,6 @@ export async function transcribe(
   const audioData = await blobToMono16k(audioBlob);
   const normalized = peakNormalize(audioData);
   const out = await pipe(normalized, {
-    language: "ar",
-    task: "transcribe",
     chunk_length_s: 30,
   });
   const result = Array.isArray(out) ? out[0] : out;
@@ -134,8 +138,6 @@ async function runWithTimings(
   if (wordTimingsSupported) {
     try {
       const out = await pipe(normalized, {
-        language: "ar",
-        task: "transcribe",
         chunk_length_s: 30,
         return_timestamps: "word",
       });
@@ -166,8 +168,6 @@ async function runWithTimings(
   }
 
   const out = await pipe(normalized, {
-    language: "ar",
-    task: "transcribe",
     chunk_length_s: 30,
   });
   const result = Array.isArray(out) ? out[0] : out;
