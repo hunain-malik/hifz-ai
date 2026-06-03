@@ -1,8 +1,13 @@
-// Tarteel Whisper-tiny fine-tuned on Quran recitation, ONNX-exported by omartariq612.
-// Loaded once per browser tab via @huggingface/transformers; cached in IndexedDB after first
-// download (~90MB at q4 quantization). All inference runs in-browser.
+// Tarteel Whisper-base fine-tuned on Quran recitation. Community ONNX export
+// by aaqibhabib at q8 quantization (~98 MB total: 76 MB merged decoder + 22 MB
+// encoder). Loaded once per browser tab via @huggingface/transformers; cached
+// in IndexedDB after first download. All inference runs in-browser.
+//
+// The base variant is significantly more accurate than tiny on Quranic Arabic
+// — particularly on short ayat with limited acoustic context (e.g. Al-Ikhlas
+// ayah 2 was a common tiny false-negative).
 
-const MODEL_ID = "omartariq612/tarteel-ai-whisper-tiny-ar-quran-onnx";
+const MODEL_ID = "aaqibhabib/whisper-base-ar-quran-onnx";
 
 export type LoadStatus =
   | { kind: "idle" }
@@ -49,7 +54,7 @@ export async function loadWhisper(
         "automatic-speech-recognition",
         MODEL_ID,
         {
-          dtype: "q4",
+          dtype: "q8",
           progress_callback: (data: unknown) => {
             const d = data as {
               status?: string;

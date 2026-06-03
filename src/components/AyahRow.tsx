@@ -10,6 +10,11 @@ import {
   type DiffToken,
 } from "@/lib/diff";
 import {
+  diffGraphemes,
+  letterAccuracy,
+  summarizeLetterDiff,
+} from "@/lib/arabicGraphemes";
+import {
   transcribeWithTimings,
   type LoadStatus,
   type WordTiming,
@@ -367,6 +372,7 @@ export function AyahRow({
         <Feedback
           tokens={replayResult.tokens}
           transcript={replayResult.transcript}
+          expectedText={verse.text_uthmani}
           audioBlob={replayResult.audioBlob}
           userWords={replayResult.words}
           onReplayWordIdxChange={setReplayWordIdx}
@@ -398,6 +404,7 @@ export function AyahRow({
 function Feedback({
   tokens,
   transcript,
+  expectedText,
   audioBlob,
   userWords,
   onReset,
@@ -406,6 +413,7 @@ function Feedback({
 }: {
   tokens: DiffToken[];
   transcript: string;
+  expectedText: string;
   audioBlob: Blob | null;
   userWords: WordTiming[];
   onReset: () => void;
@@ -413,6 +421,18 @@ function Feedback({
   onReplayWordIdxChange: (idx: number) => void;
 }) {
   const score = accuracyScore(tokens);
+  const letterTokens = useMemo(
+    () => diffGraphemes(expectedText, transcript),
+    [expectedText, transcript]
+  );
+  const letterScore = useMemo(
+    () => letterAccuracy(letterTokens),
+    [letterTokens]
+  );
+  const letterIssues = useMemo(
+    () => summarizeLetterDiff(letterTokens, { limit: 8 }),
+    [letterTokens]
+  );
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -509,9 +529,11 @@ function Feedback({
   return (
     <div className="mt-4 border-t border-stone-200 dark:border-stone-800 pt-3">
       <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-        <p className="text-xs uppercase tracking-wider text-stone-500 dark:text-stone-400">
-          Feedback · {score}% words correct
-        </p>
+        <div className="flex items-center gap-3 flex-wrap">
+          <p className="text-xs uppercase tracking-wider text-stone-500 dark:text-stone-400">
+            {score}% words · {letterScore}% letters + tashkeel
+          </p>
+        </div>
         <div className="flex items-center gap-3">
           {audioUrl && (
             <button
@@ -569,6 +591,23 @@ function Feedback({
           </span>
         ))}
       </p>
+      {letterIssues.length > 0 && (
+        <div className="mt-3 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 p-3">
+          <p className="text-xs uppercase tracking-wider text-amber-800 dark:text-amber-300 mb-1.5 font-semibold">
+            What to fix
+          </p>
+          <ul className="text-xs text-amber-900 dark:text-amber-200 leading-relaxed space-y-0.5">
+            {letterIssues.map((issue, idx) => (
+              <li key={idx}>{issue}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {letterIssues.length === 0 && letterScore >= 95 && (
+        <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-400">
+          ✓ Clean letter + tashkeel match against the Uthmani text.
+        </p>
+      )}
       <details className="mt-2 text-xs text-stone-500 dark:text-stone-400">
         <summary className="cursor-pointer">What the model heard</summary>
         <p
