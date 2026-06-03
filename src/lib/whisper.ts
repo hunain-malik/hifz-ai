@@ -10,10 +10,26 @@ export type LoadStatus =
   | { kind: "ready" }
   | { kind: "error"; message: string };
 
+export type WordTiming = {
+  text: string;
+  start: number; // seconds
+  end: number; // seconds
+};
+
+export type TranscriptionResult = {
+  text: string;
+  words: WordTiming[];
+};
+
+type PipelineOutput = {
+  text?: string;
+  chunks?: { text: string; timestamp: [number | null, number | null] }[];
+};
+
 type Pipeline = (
   input: Float32Array,
   opts?: Record<string, unknown>
-) => Promise<{ text?: string } | { text?: string }[]>;
+) => Promise<PipelineOutput | PipelineOutput[]>;
 
 let pipelinePromise: Promise<Pipeline> | null = null;
 let cached: Pipeline | null = null;
@@ -76,6 +92,47 @@ export async function transcribe(
   });
   const result = Array.isArray(out) ? out[0] : out;
   return (result?.text ?? "").trim();
+}
+
+export async function transcribeWithTimings(
+  audioBlob: Blob,
+  options?: { onStatus?: (s: LoadStatus) => void }
+): Promise<TranscriptionResult> {
+  const pipe = await loadWhisper(options?.onStatus);
+  const audioData = await blobToMono16k(audioBlob);
+  return runWithTimings(pipe, audioData);
+}
+
+export async function transcribeFloat32WithTimings(
+  audioData: Float32Array
+): Promise<TranscriptionResult> {
+  if (!cached) {
+    throw new Error("Whisper not loaded yet");
+  }
+  return runWithTimings(cached, audioData);
+}
+
+async function runWithTimings(
+  pipe: Pipeline,
+  audioData: Float32Array
+): Promise<TranscriptionResult> {
+  const out = await pipe(audioData, {
+    language: "ar",
+    task: "transcribe",
+    chunk_length_s: 30,
+    return_timestamps: "word",
+  });
+  const result = Array.isArray(out) ? out[0] : out;
+  const text = (result?.text ?? "").trim();
+  const words: WordTiming[] = [];
+  for (const chunk of result?.chunks ?? []) {
+    const t = (chunk.text ?? "").trim();
+    if (!t) continue;
+    const [start, end] = chunk.timestamp;
+    if (start === null || end === null) continue;
+    words.push({ text: t, start, end });
+  }
+  return { text, words };
 }
 
 async function blobToMono16k(blob: Blob): Promise<Float32Array> {

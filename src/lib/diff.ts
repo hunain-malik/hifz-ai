@@ -104,3 +104,46 @@ export function accuracyScore(tokens: DiffToken[]): number {
   const correct = tokens.filter((t) => t.status === "correct").length;
   return Math.round((correct / denom) * 100);
 }
+
+/**
+ * Walks the diff tokens in order and returns alignment[userWordIdx] = expectedWordIdx | -1.
+ * Both indices are 0-based into their respective normalized-and-tokenized arrays.
+ * Use this to know which expected word the user was reciting at a given user-audio time.
+ */
+export function alignUserToExpected(tokens: DiffToken[]): number[] {
+  const alignment: number[] = [];
+  let expectedIdx = 0;
+  let userIdx = 0;
+  for (const t of tokens) {
+    switch (t.status) {
+      case "correct":
+      case "wrong":
+        alignment[userIdx] = expectedIdx;
+        expectedIdx += 1;
+        userIdx += 1;
+        break;
+      case "missed":
+        expectedIdx += 1;
+        break;
+      case "extra":
+        alignment[userIdx] = -1;
+        userIdx += 1;
+        break;
+    }
+  }
+  return alignment;
+}
+
+/**
+ * Given an array of {start,end} word timings (in seconds) and a current playback time,
+ * return the index of the word currently being spoken, or -1 if outside any word.
+ */
+export function wordIndexAtTime(
+  words: { start: number; end: number }[],
+  timeSec: number
+): number {
+  for (let i = 0; i < words.length; i++) {
+    if (timeSec >= words[i].start && timeSec <= words[i].end) return i;
+  }
+  return -1;
+}

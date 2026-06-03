@@ -1,13 +1,25 @@
 import type { Verse } from "./quran";
-import { transcribe } from "./whisper";
+import {
+  transcribeFloat32WithTimings,
+  transcribeWithTimings,
+  type WordTiming,
+} from "./whisper";
+import { alignUserToExpected, diffRecitation, tokenize } from "./diff";
 
 export type ContinuousCallbacks = {
   onActiveVerseChanged: (verseNumber: number | null) => void;
   onTranscribing: (verseNumber: number) => void;
-  onResult: (verseNumber: number, transcript: string) => void;
+  onResult: (
+    verseNumber: number,
+    transcript: string,
+    audioBlob: Blob,
+    words: WordTiming[]
+  ) => void;
   onError: (verseNumber: number | null, message: string) => void;
   onComplete: () => void;
   onMicLevel?: (level: number, threshold: number, isSilent: boolean) => void;
+  /** Live word index in the EXPECTED ayah text being highlighted right now. */
+  onLiveExpectedWordIdx?: (verseNumber: number, expectedIdx: number) => void;
 };
 
 export type ContinuousHandle = {
@@ -31,6 +43,8 @@ export async function startContinuousRecite(opts: {
   startIndex?: number;
   silenceDurationMs?: number;
   minSegmentMs?: number;
+  liveHighlights?: boolean;
+  livePollMs?: number;
   callbacks: ContinuousCallbacks;
 }): Promise<ContinuousHandle> {
   const startIndex = opts.startIndex ?? 0;
@@ -39,6 +53,9 @@ export async function startContinuousRecite(opts: {
   const CALIBRATION_MS = 600;
   const MIN_THRESHOLD = 0.012;
   const THRESHOLD_MULTIPLIER = 2.2;
+  const LIVE_POLL_MS = opts.livePollMs ?? 1500;
+  const LIVE_MAX_BUFFER_SEC = 12;
+  const SAMPLE_RATE = 16000;
 
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false },
@@ -48,12 +65,44 @@ export async function startContinuousRecite(opts: {
     window.AudioContext ??
     (window as unknown as { webkitAudioContext: typeof AudioContext })
       .webkitAudioContext;
-  const audioContext = new AudioCtx();
+  const audioContext = new AudioCtx({ sampleRate: SAMPLE_RATE });
   const source = audioContext.createMediaStreamSource(stream);
   const analyser = audioContext.createAnalyser();
   analyser.fftSize = 1024;
   source.connect(analyser);
   const timeData = new Uint8Array(analyser.frequencyBinCount);
+
+  // Live PCM ring buffer for streaming transcription (Phase B)
+  let liveBuffer: Float32Array[] = [];
+  let liveBufferSamples = 0;
+  let liveProcessor: ScriptProcessorNode | null = null;
+  let liveTranscribing = false;
+  let livePollTimer: number | null = null;
+  let liveSegmentSampleStart = 0; // samples since this verse's segment began
+  let totalSamples = 0;
+
+  if (opts.liveHighlights !== false) {
+    const bufferSize = 4096;
+    liveProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+    liveProcessor.onaudioprocess = (e) => {
+      const data = e.inputBuffer.getChannelData(0);
+      liveBuffer.push(new Float32Array(data));
+      liveBufferSamples += data.length;
+      totalSamples += data.length;
+      // Drop old samples to keep buffer bounded
+      const maxSamples = LIVE_MAX_BUFFER_SEC * SAMPLE_RATE;
+      while (liveBufferSamples > maxSamples && liveBuffer.length > 1) {
+        const dropped = liveBuffer.shift()!;
+        liveBufferSamples -= dropped.length;
+        liveSegmentSampleStart = Math.max(
+          0,
+          liveSegmentSampleStart - dropped.length
+        );
+      }
+    };
+    source.connect(liveProcessor);
+    liveProcessor.connect(audioContext.destination);
+  }
 
   let currentIndex = startIndex;
   let recorder: MediaRecorder | null = null;
@@ -83,6 +132,7 @@ export async function startContinuousRecite(opts: {
     chunks = [];
     silenceStart = null;
     segmentStart = performance.now();
+    liveSegmentSampleStart = totalSamples;
     const mime = pickMimeType();
     const r = new MediaRecorder(
       stream,
@@ -99,16 +149,21 @@ export async function startContinuousRecite(opts: {
 
       if (!stopped) {
         opts.callbacks.onTranscribing(myVerseNumber);
-        transcribe(blob)
-          .then((text) =>
-            opts.callbacks.onResult(myVerseNumber, text.trim())
+        transcribeWithTimings(blob)
+          .then(({ text, words }) =>
+            opts.callbacks.onResult(
+              myVerseNumber,
+              text.trim(),
+              blob,
+              words
+            )
           )
           .catch((err) => {
             opts.callbacks.onError(
               myVerseNumber,
               err instanceof Error ? err.message : "Transcription failed."
             );
-            opts.callbacks.onResult(myVerseNumber, "");
+            opts.callbacks.onResult(myVerseNumber, "", blob, []);
           });
 
         currentIndex++;
@@ -175,10 +230,84 @@ export async function startContinuousRecite(opts: {
 
   function finalize() {
     if (rafHandle !== null) cancelAnimationFrame(rafHandle);
+    if (livePollTimer !== null) {
+      clearTimeout(livePollTimer);
+      livePollTimer = null;
+    }
+    if (liveProcessor) {
+      liveProcessor.disconnect();
+      liveProcessor.onaudioprocess = null;
+      liveProcessor = null;
+    }
     stream.getTracks().forEach((t) => t.stop());
     if (audioContext.state !== "closed") void audioContext.close();
     opts.callbacks.onActiveVerseChanged(null);
     opts.callbacks.onComplete();
+  }
+
+  async function pollLive() {
+    if (stopped || liveTranscribing) {
+      schedulePoll();
+      return;
+    }
+    if (currentIndex >= opts.verses.length) return;
+    // Grab the audio for the current segment only (samples since segment start)
+    const segmentSamples = totalSamples - liveSegmentSampleStart;
+    if (segmentSamples < SAMPLE_RATE * 0.5) {
+      // Less than 0.5s captured for this segment; skip
+      schedulePoll();
+      return;
+    }
+    // Concat buffer chunks into single Float32 covering current segment
+    const total = liveBufferSamples;
+    const overall = new Float32Array(total);
+    let offset = 0;
+    for (const chunk of liveBuffer) {
+      overall.set(chunk, offset);
+      offset += chunk.length;
+    }
+    // Slice from segmentStart to end. liveSegmentSampleStart is in *current
+    // buffer* coords (we adjusted it when dropping old chunks).
+    const sliceStart = Math.max(0, liveSegmentSampleStart);
+    const segmentAudio = overall.subarray(sliceStart);
+    if (segmentAudio.length < SAMPLE_RATE * 0.5) {
+      schedulePoll();
+      return;
+    }
+    const liveVerseNumber = opts.verses[currentIndex].verse_number;
+    const expectedText = opts.verses[currentIndex].text_uthmani;
+
+    liveTranscribing = true;
+    try {
+      const { text } = await transcribeFloat32WithTimings(
+        new Float32Array(segmentAudio)
+      );
+      if (stopped || liveVerseNumber !== opts.verses[currentIndex].verse_number) {
+        liveTranscribing = false;
+        return;
+      }
+      const tokens = diffRecitation(expectedText, text);
+      const alignment = alignUserToExpected(tokens);
+      const userTokens = tokenize(text);
+      const lastUserIdx = userTokens.length - 1;
+      if (lastUserIdx >= 0 && lastUserIdx < alignment.length) {
+        const expectedIdx = alignment[lastUserIdx];
+        if (expectedIdx >= 0) {
+          opts.callbacks.onLiveExpectedWordIdx?.(liveVerseNumber, expectedIdx);
+        }
+      }
+    } catch {
+      // Live transcription failures are non-fatal; just skip this round
+    }
+    liveTranscribing = false;
+    schedulePoll();
+  }
+
+  function schedulePoll() {
+    if (stopped || !opts.liveHighlights) return;
+    livePollTimer = window.setTimeout(() => {
+      void pollLive();
+    }, LIVE_POLL_MS);
   }
 
   function stop() {
@@ -209,6 +338,9 @@ export async function startContinuousRecite(opts: {
 
   startSegment();
   tick();
+  if (opts.liveHighlights !== false) {
+    schedulePoll();
+  }
 
   return { stop, skipCurrent };
 }

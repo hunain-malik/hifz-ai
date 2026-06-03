@@ -2,8 +2,18 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Verse } from "@/lib/quran";
-import { diffRecitation, accuracyScore, type DiffToken } from "@/lib/diff";
-import { transcribe, type LoadStatus } from "@/lib/whisper";
+import {
+  diffRecitation,
+  accuracyScore,
+  alignUserToExpected,
+  tokenize,
+  type DiffToken,
+} from "@/lib/diff";
+import {
+  transcribeWithTimings,
+  type LoadStatus,
+  type WordTiming,
+} from "@/lib/whisper";
 import { usePlayer, useWordIndexFor } from "./PlayerProvider";
 import type { ReciteRegistry } from "./SurahView";
 
@@ -12,13 +22,24 @@ type RecState =
   | { kind: "recording" }
   | { kind: "loading-model"; progress: number }
   | { kind: "transcribing" }
-  | { kind: "result"; tokens: DiffToken[]; transcript: string }
+  | {
+      kind: "result";
+      tokens: DiffToken[];
+      transcript: string;
+      audioBlob: Blob;
+      words: WordTiming[];
+    }
   | { kind: "error"; message: string };
 
 export type ContinuousOverride =
-  | { kind: "recording" }
+  | { kind: "recording"; liveWordIdx?: number }
   | { kind: "transcribing" }
-  | { kind: "result"; transcript: string }
+  | {
+      kind: "result";
+      transcript: string;
+      audioBlob: Blob;
+      words: WordTiming[];
+    }
   | { kind: "error"; message: string };
 
 export function AyahRow({
@@ -39,6 +60,7 @@ export function AyahRow({
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const [replayWordIdx, setReplayWordIdx] = useState<number>(-1);
 
   const words = useMemo(
     () => verse.text_uthmani.trim().split(/\s+/),
@@ -56,6 +78,32 @@ export function AyahRow({
 
   const isContinuousActive = continuousOverride?.kind === "recording";
 
+  // Decide which result (if any) we're showing replay UI for
+  const replayResult: {
+    tokens: DiffToken[];
+    transcript: string;
+    audioBlob: Blob;
+    words: WordTiming[];
+  } | null = useMemo(() => {
+    if (continuousOverride?.kind === "result" && continuousTokens) {
+      return {
+        tokens: continuousTokens,
+        transcript: continuousOverride.transcript,
+        audioBlob: continuousOverride.audioBlob,
+        words: continuousOverride.words,
+      };
+    }
+    if (!continuousOverride && rec.kind === "result") {
+      return {
+        tokens: rec.tokens,
+        transcript: rec.transcript,
+        audioBlob: rec.audioBlob,
+        words: rec.words,
+      };
+    }
+    return null;
+  }, [continuousOverride, continuousTokens, rec]);
+
   useEffect(
     () => () => {
       streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -69,7 +117,9 @@ export function AyahRow({
   );
 
   useEffect(() => {
-    return registry.register(verse.verse_number, () => startReciteRef.current());
+    return registry.register(verse.verse_number, () =>
+      startReciteRef.current()
+    );
   }, [registry, verse.verse_number]);
 
   const startReciteRef = useRef<() => void>(() => {});
@@ -90,7 +140,10 @@ export function AyahRow({
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       const mime = pickMimeType();
-      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      const rec = new MediaRecorder(
+        stream,
+        mime ? { mimeType: mime } : undefined
+      );
       chunksRef.current = [];
       rec.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
@@ -128,7 +181,7 @@ export function AyahRow({
   async function runTranscription(blob: Blob) {
     setRec({ kind: "transcribing" });
     try {
-      const text = await transcribe(blob, {
+      const { text, words: wordTimings } = await transcribeWithTimings(blob, {
         onStatus: (status: LoadStatus) => {
           if (status.kind === "loading") {
             setRec({ kind: "loading-model", progress: status.progress });
@@ -138,12 +191,17 @@ export function AyahRow({
         },
       });
       const tokens = diffRecitation(verse.text_uthmani, text);
-      setRec({ kind: "result", tokens, transcript: text });
+      setRec({
+        kind: "result",
+        tokens,
+        transcript: text,
+        audioBlob: blob,
+        words: wordTimings,
+      });
     } catch (err) {
       setRec({
         kind: "error",
-        message:
-          err instanceof Error ? err.message : "Transcription failed.",
+        message: err instanceof Error ? err.message : "Transcription failed.",
       });
     }
   }
@@ -158,7 +216,7 @@ export function AyahRow({
       className={`rounded-lg border bg-white dark:bg-stone-900 p-4 transition-colors ${
         isContinuousActive
           ? "border-indigo-500 dark:border-indigo-500 shadow-md ring-2 ring-indigo-200 dark:ring-indigo-900/60"
-          : activeWord !== null
+          : activeWord !== null || replayWordIdx >= 0
             ? "border-emerald-400 dark:border-emerald-700 shadow-sm"
             : "border-stone-200 dark:border-stone-800"
       }`}
@@ -242,13 +300,23 @@ export function AyahRow({
         {words.map((w, i) => {
           const wordPos = i + 1;
           const isActive = activeWord === wordPos;
+          const isReplayActive = replayWordIdx === i;
+          const liveIdx =
+            continuousOverride?.kind === "recording"
+              ? (continuousOverride.liveWordIdx ?? -1)
+              : -1;
+          const isLiveActive = liveIdx === i;
           return (
             <span
               key={i}
               className={`arabic-word ${
-                isActive
-                  ? "bg-emerald-200 dark:bg-emerald-900/70 text-emerald-950 dark:text-emerald-100"
-                  : ""
+                isLiveActive
+                  ? "bg-indigo-300 dark:bg-indigo-800/80 text-indigo-950 dark:text-indigo-50 ring-2 ring-indigo-500"
+                  : isReplayActive
+                    ? "bg-indigo-200 dark:bg-indigo-900/70 text-indigo-950 dark:text-indigo-100"
+                    : isActive
+                      ? "bg-emerald-200 dark:bg-emerald-900/70 text-emerald-950 dark:text-emerald-100"
+                      : ""
               }`}
             >
               {w}
@@ -258,21 +326,14 @@ export function AyahRow({
         })}
       </p>
 
-      {continuousOverride?.kind === "result" && (
-        continuousOverride.transcript.length === 0 ? (
+      {continuousOverride?.kind === "result" &&
+        continuousOverride.transcript.length === 0 && (
           <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">
             Whisper didn&apos;t hear anything for this ayah. The mic may be
             quiet, the segment may have been too short, or VAD advanced too
             early.
           </p>
-        ) : continuousTokens ? (
-          <Feedback
-            tokens={continuousTokens}
-            transcript={continuousOverride.transcript}
-            onReset={() => {}}
-          />
-        ) : null
-      )}
+        )}
       {continuousOverride?.kind === "error" && (
         <p className="mt-3 text-xs text-red-600 dark:text-red-400">
           {continuousOverride.message}
@@ -302,13 +363,18 @@ export function AyahRow({
           Transcribing with Tarteel Whisper…
         </p>
       )}
-      {!continuousOverride && rec.kind === "result" && (
+      {replayResult && (
         <Feedback
-          tokens={rec.tokens}
-          transcript={rec.transcript}
-          onReset={() => setRec({ kind: "idle" })}
+          tokens={replayResult.tokens}
+          transcript={replayResult.transcript}
+          audioBlob={replayResult.audioBlob}
+          userWords={replayResult.words}
+          onReplayWordIdxChange={setReplayWordIdx}
+          onReset={
+            continuousOverride ? () => {} : () => setRec({ kind: "idle" })
+          }
           onAdvance={
-            hasNext
+            !continuousOverride && hasNext
               ? () => registry.advanceFrom(verse.verse_number)
               : undefined
           }
@@ -332,22 +398,130 @@ export function AyahRow({
 function Feedback({
   tokens,
   transcript,
+  audioBlob,
+  userWords,
   onReset,
   onAdvance,
+  onReplayWordIdxChange,
 }: {
   tokens: DiffToken[];
   transcript: string;
+  audioBlob: Blob | null;
+  userWords: WordTiming[];
   onReset: () => void;
   onAdvance?: () => void;
+  onReplayWordIdxChange: (idx: number) => void;
 }) {
   const score = accuracyScore(tokens);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  // Map user-word-index → expected-word-index via the diff alignment
+  const userToExpected = useMemo(() => alignUserToExpected(tokens), [tokens]);
+
+  // Cache normalized user word tokens — Whisper segment text vs LCS token text
+  // come from the same transcript, so their tokenizations should align 1:1
+  const userTokenCount = useMemo(
+    () => tokenize(transcript).length,
+    [transcript]
+  );
+
+  useEffect(() => {
+    if (!audioBlob) return;
+    const url = URL.createObjectURL(audioBlob);
+    setAudioUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [audioBlob]);
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      audioRef.current?.pause();
+      onReplayWordIdxChange(-1);
+    };
+  }, [onReplayWordIdxChange]);
+
+  function startReplay() {
+    if (!audioUrl) return;
+    if (!audioRef.current) {
+      const a = new Audio(audioUrl);
+      audioRef.current = a;
+      a.addEventListener("ended", () => {
+        setIsPlaying(false);
+        if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+        onReplayWordIdxChange(-1);
+      });
+      a.addEventListener("pause", () => {
+        setIsPlaying(false);
+        if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      });
+    } else {
+      audioRef.current.src = audioUrl;
+      audioRef.current.currentTime = 0;
+    }
+    void audioRef.current.play();
+    setIsPlaying(true);
+    tickReplay();
+  }
+
+  function stopReplay() {
+    audioRef.current?.pause();
+    setIsPlaying(false);
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    onReplayWordIdxChange(-1);
+  }
+
+  function tickReplay() {
+    const a = audioRef.current;
+    if (!a) return;
+    const t = a.currentTime;
+    let userIdx = -1;
+    for (let i = 0; i < userWords.length; i++) {
+      if (t >= userWords[i].start && t <= userWords[i].end) {
+        userIdx = i;
+        break;
+      }
+      if (t < userWords[i].start) break;
+    }
+    if (userIdx < 0 && userWords.length > 0) {
+      // If between words, light up the previously spoken word so it doesn't jump to -1
+      for (let i = userWords.length - 1; i >= 0; i--) {
+        if (t >= userWords[i].end) {
+          userIdx = i;
+          break;
+        }
+      }
+    }
+    // Whisper sometimes returns fewer "chunks" than tokenized words; clamp.
+    const safeUserIdx = Math.min(userIdx, userTokenCount - 1);
+    const expectedIdx =
+      safeUserIdx >= 0 && safeUserIdx < userToExpected.length
+        ? userToExpected[safeUserIdx]
+        : -1;
+    onReplayWordIdxChange(expectedIdx >= 0 ? expectedIdx : -1);
+    if (!a.paused && !a.ended) {
+      rafRef.current = requestAnimationFrame(tickReplay);
+    }
+  }
+
   return (
     <div className="mt-4 border-t border-stone-200 dark:border-stone-800 pt-3">
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
         <p className="text-xs uppercase tracking-wider text-stone-500 dark:text-stone-400">
           Feedback · {score}% words correct
         </p>
         <div className="flex items-center gap-3">
+          {audioUrl && (
+            <button
+              onClick={isPlaying ? stopReplay : startReplay}
+              className="text-xs font-medium rounded-md bg-indigo-600 text-white px-2.5 py-1 hover:bg-indigo-700"
+              title="Replay your recitation with synchronized word highlighting"
+            >
+              {isPlaying ? "⏸ Stop replay" : "▶ Replay mine"}
+            </button>
+          )}
           <button
             onClick={onReset}
             className="text-xs text-stone-500 dark:text-stone-400 hover:underline"
@@ -397,7 +571,10 @@ function Feedback({
       </p>
       <details className="mt-2 text-xs text-stone-500 dark:text-stone-400">
         <summary className="cursor-pointer">What the model heard</summary>
-        <p className="arabic mt-1" style={{ fontSize: "1.25rem", lineHeight: "2" }}>
+        <p
+          className="arabic mt-1"
+          style={{ fontSize: "1.25rem", lineHeight: "2" }}
+        >
           {transcript || "(empty)"}
         </p>
       </details>

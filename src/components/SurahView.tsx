@@ -7,7 +7,7 @@ import {
   startContinuousRecite,
   type ContinuousHandle,
 } from "@/lib/continuousRecite";
-import { loadWhisper, type LoadStatus } from "@/lib/whisper";
+import { loadWhisper, type LoadStatus, type WordTiming } from "@/lib/whisper";
 import { AyahRow, type ContinuousOverride } from "./AyahRow";
 import { PageDivider } from "./PageDivider";
 import { ScrollPageIndicator } from "./ScrollPageIndicator";
@@ -33,26 +33,36 @@ type MicMeter = {
   isSilent: boolean;
 };
 
+type RecitedAyah = {
+  transcript: string;
+  audioBlob: Blob;
+  words: WordTiming[];
+};
+
 type ContinuousState = {
   phase: ContinuousPhase;
   modelProgress: number;
   activeVerse: number | null;
+  liveWordIdx: number;
   transcribing: Set<number>;
-  transcripts: Map<number, string>;
+  results: Map<number, RecitedAyah>;
   errors: Map<number, string>;
   errorMessage: string | null;
   meter: MicMeter | null;
+  liveHighlights: boolean;
 };
 
 const EMPTY_CONTINUOUS: ContinuousState = {
   phase: "off",
   modelProgress: 0,
   activeVerse: null,
+  liveWordIdx: -1,
   transcribing: new Set(),
-  transcripts: new Map(),
+  results: new Map(),
   errors: new Map(),
   errorMessage: null,
   meter: null,
+  liveHighlights: true,
 };
 
 export function SurahView({
@@ -150,11 +160,13 @@ export function SurahView({
       const session = await startContinuousRecite({
         verses,
         startIndex: Math.max(0, startIndex),
+        liveHighlights: continuous.liveHighlights,
         callbacks: {
           onActiveVerseChanged: (verseNumber) =>
             setContinuous((s) => ({
               ...s,
               activeVerse: verseNumber,
+              liveWordIdx: -1,
               phase: verseNumber !== null ? "listening" : s.phase,
             })),
           onTranscribing: (verseNumber) =>
@@ -163,16 +175,16 @@ export function SurahView({
               next.add(verseNumber);
               return { ...s, transcribing: next };
             }),
-          onResult: (verseNumber, transcript) =>
+          onResult: (verseNumber, transcript, audioBlob, words) =>
             setContinuous((s) => {
               const nextTranscribing = new Set(s.transcribing);
               nextTranscribing.delete(verseNumber);
-              const nextTranscripts = new Map(s.transcripts);
-              nextTranscripts.set(verseNumber, transcript);
+              const nextResults = new Map(s.results);
+              nextResults.set(verseNumber, { transcript, audioBlob, words });
               return {
                 ...s,
                 transcribing: nextTranscribing,
-                transcripts: nextTranscripts,
+                results: nextResults,
               };
             }),
           onError: (verseNumber, message) =>
@@ -203,6 +215,12 @@ export function SurahView({
                 ? s
                 : { ...s, meter: { rms, threshold, isSilent } }
             ),
+          onLiveExpectedWordIdx: (verseNumber, expectedIdx) =>
+            setContinuous((s) =>
+              s.activeVerse === verseNumber
+                ? { ...s, liveWordIdx: expectedIdx }
+                : s
+            ),
         },
       });
       sessionRef.current = session;
@@ -227,11 +245,15 @@ export function SurahView({
   }
 
   function clearContinuousResults() {
-    setContinuous(EMPTY_CONTINUOUS);
+    setContinuous((s) => ({ ...EMPTY_CONTINUOUS, liveHighlights: s.liveHighlights }));
+  }
+
+  function toggleLiveHighlights() {
+    setContinuous((s) => ({ ...s, liveHighlights: !s.liveHighlights }));
   }
 
   const hasResults =
-    continuous.transcripts.size > 0 || continuous.errors.size > 0;
+    continuous.results.size > 0 || continuous.errors.size > 0;
   const isActive = continuous.phase !== "off";
 
   return (
@@ -246,7 +268,9 @@ export function SurahView({
         continuousErrorMessage={continuous.errorMessage}
         continuousMeter={continuous.meter}
         continuousTranscribingCount={continuous.transcribing.size}
-        continuousResultCount={continuous.transcripts.size}
+        continuousResultCount={continuous.results.size}
+        liveHighlights={continuous.liveHighlights}
+        onToggleLiveHighlights={toggleLiveHighlights}
         hasContinuousResults={hasResults}
         onStartContinuous={() => void startContinuous()}
         onStopContinuous={stopContinuous}
@@ -282,18 +306,26 @@ function continuousOverrideFor(
   state: ContinuousState,
   verseNumber: number
 ): ContinuousOverride | null {
-  if (state.phase === "off" && state.transcripts.size === 0 && state.errors.size === 0) {
+  if (state.phase === "off" && state.results.size === 0 && state.errors.size === 0) {
     return null;
   }
   if (state.activeVerse === verseNumber && state.phase === "listening") {
-    return { kind: "recording" };
+    return {
+      kind: "recording",
+      liveWordIdx: state.liveHighlights ? state.liveWordIdx : -1,
+    };
   }
   if (state.transcribing.has(verseNumber)) {
     return { kind: "transcribing" };
   }
-  const t = state.transcripts.get(verseNumber);
-  if (t !== undefined) {
-    return { kind: "result", transcript: t };
+  const r = state.results.get(verseNumber);
+  if (r !== undefined) {
+    return {
+      kind: "result",
+      transcript: r.transcript,
+      audioBlob: r.audioBlob,
+      words: r.words,
+    };
   }
   const err = state.errors.get(verseNumber);
   if (err !== undefined) {
@@ -313,6 +345,8 @@ function ControlsBar({
   continuousMeter,
   continuousTranscribingCount,
   continuousResultCount,
+  liveHighlights,
+  onToggleLiveHighlights,
   hasContinuousResults,
   onStartContinuous,
   onStopContinuous,
@@ -329,6 +363,8 @@ function ControlsBar({
   continuousMeter: MicMeter | null;
   continuousTranscribingCount: number;
   continuousResultCount: number;
+  liveHighlights: boolean;
+  onToggleLiveHighlights: () => void;
   hasContinuousResults: boolean;
   onStartContinuous: () => void;
   onStopContinuous: () => void;
@@ -435,6 +471,17 @@ function ControlsBar({
             >
               🎙 Continuous recite
             </button>
+          )}
+          {!continuousActive && (
+            <label className="inline-flex items-center gap-1.5 text-xs text-stone-600 dark:text-stone-400 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={liveHighlights}
+                onChange={onToggleLiveHighlights}
+                className="h-3.5 w-3.5"
+              />
+              Live word highlight
+            </label>
           )}
           {hasContinuousResults && !continuousActive && (
             <button
