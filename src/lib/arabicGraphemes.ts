@@ -154,22 +154,51 @@ function describeMarkShort(mark: string): string {
 // ── Letter-confusion table (Stage 5 seed) ───────────────────────────────
 // Common substitutions when Arabic phonemes don't exist in the speaker's L1.
 const LETTER_TIPS: Record<string, string> = {
+  // Dental fricatives ↔ alveolar fricatives
   "س->ث":
     "siin (س) → thaa (ث): touch the tip of your tongue between your front teeth.",
   "ث->س":
     "thaa (ث) → siin (س): you held it like /s/, but ث needs the tongue between the teeth.",
+  "ش->س":
+    "shiin (ش) → siin (س): tongue moved forward. Push it back a bit and round the air.",
+  "ز->ذ":
+    "zaay (ز) → dhaal (ذ): they're both voiced sibilants but ذ puts the tongue between teeth.",
+  "ذ->ز":
+    "dhaal (ذ) → zaay (ز): tongue should be between teeth (like 'th' in 'this'), not behind them.",
+  "ذ->د":
+    "dhaal (ذ) → daal (د): ذ is the voiced 'th' (this). Don't make it a stop.",
+  "د->ذ":
+    "daal (د) → dhaal (ذ): د is a stop, not a fricative. Tongue tip against teeth ridge, no air leak.",
+  // Throat letters (often the hardest for non-Arabic speakers)
   "ه->ح":
     "haa (ه) → ḥaa (ح): ح is deeper in the throat, breathy but not pharyngeal.",
   "ح->ه":
     "ḥaa (ح) → haa (ه): pull the air from your upper throat, not your mouth.",
+  "خ->ح":
+    "khaa (خ) → ḥaa (ح): خ is the rasping back-throat sound, ح is breathier and lighter.",
+  "ح->خ":
+    "ḥaa (ح) → khaa (خ): you added rasp. ح is voiceless, breathy, no scraping.",
+  "خ->ك":
+    "khaa (خ) → kaaf (ك): you said the stop instead of the fricative. خ should have airflow.",
+  "ك->خ":
+    "kaaf (ك) → khaa (خ): you let air escape continuously. ك is a clean stop.",
+  "غ->ر":
+    "ghayn (غ) → raa (ر): غ is back-of-throat like a soft French 'r' — not a tongue tap.",
+  "ر->غ":
+    "raa (ر) → ghayn (غ): ر is a tongue tap on the ridge, not the throat.",
+  // Hamza ↔ ʿAyn confusion (very common)
   "أ->ع":
     "hamza (ء) → ʿayn (ع): ع comes from the middle of the throat, hamza is just a glottal stop.",
   "ع->أ":
     "ʿayn (ع) → hamza (ء): you flattened ع. Constrict the middle of the throat.",
+  "ع->غ":
+    "ʿayn (ع) → ghayn (غ): both throat letters but ع is voiced without scraping; غ has the scrape.",
+  // Velar/uvular stops
   "ك->ق":
     "kaaf (ك) → qaaf (ق): ق is much deeper — back of the tongue against the uvula.",
   "ق->ك":
     "qaaf (ق) → kaaf (ك): you said it forward; ق is pulled all the way back.",
+  // Emphatics (heavy letters) — common L1 confusion losing the heaviness
   "د->ض":
     "daal (د) → ḍaad (ض): ض is heavy/emphatic. Tongue covers more roof of mouth.",
   "ض->د":
@@ -182,6 +211,17 @@ const LETTER_TIPS: Record<string, string> = {
     "zaay (ز) → ẓaa (ظ): ظ is emphatic and uses 'th' shape (between teeth).",
   "ظ->ز":
     "ẓaa (ظ) → zaay (ز): tongue should be between teeth, voiced and heavy.",
+  "س->ص":
+    "siin (س) → ṣaad (ص): ص is the emphatic 'sad' sound. Tongue spreads heavy across the palate.",
+  "ص->س":
+    "ṣaad (ص) → siin (س): you went light. ص needs that heavy spread.",
+  "ظ->ض":
+    "ẓaa (ظ) → ḍaad (ض): close cousins but ظ is between teeth (th-like), ض is behind them.",
+  // Nasals and laterals (less common)
+  "ن->م":
+    "noon (ن) → meem (م): tongue tip touches the ridge for ن; lips close for م. Different point.",
+  "م->ن":
+    "meem (م) → noon (ن): your lips should close on م, not stay open.",
 };
 
 function letterPair(expected: string, actual: string): string | null {

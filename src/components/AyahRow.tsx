@@ -20,6 +20,13 @@ import {
   type LoadStatus,
   type WordTiming,
 } from "@/lib/whisper";
+import {
+  analyzeTiming,
+  blobToMono16k,
+  getSheikhSurahPCM,
+  sliceAyahPCM,
+  type TimingReport,
+} from "@/lib/timingAnalysis";
 import { usePlayer, useWordIndexFor } from "./PlayerProvider";
 import type { ReciteRegistry } from "./SurahView";
 
@@ -61,12 +68,14 @@ export function AyahRow({
   continuousOverride?: ContinuousOverride | null;
   continuousActive?: boolean;
 }) {
-  const { store, audioStatus } = usePlayer();
+  const { store, audioStatus, surahAudio } = usePlayer();
   const [rec, setRec] = useState<RecState>({ kind: "idle" });
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const [replayWordIdx, setReplayWordIdx] = useState<number>(-1);
+  const [timingReport, setTimingReport] = useState<TimingReport | null>(null);
+  const [timingPending, setTimingPending] = useState(false);
 
   const words = useMemo(
     () => verse.text_uthmani.trim().split(/\s+/),
@@ -109,6 +118,46 @@ export function AyahRow({
     }
     return null;
   }, [continuousOverride, continuousTokens, rec]);
+
+  // Run DTW timing analysis (sheikh vs user) when we have a result + audio
+  useEffect(() => {
+    setTimingReport(null);
+    if (!replayResult || !surahAudio) return;
+    const timing = surahAudio.verseTimings.find(
+      (t) => t.verse_key === verse.verse_key
+    );
+    if (!timing || timing.segments.length === 0) return;
+    let cancelled = false;
+    setTimingPending(true);
+    (async () => {
+      try {
+        const [userPcm, sheikhFull] = await Promise.all([
+          blobToMono16k(replayResult.audioBlob),
+          getSheikhSurahPCM(surahAudio.audioUrl),
+        ]);
+        if (cancelled) return;
+        const sheikhAyahPcm = sliceAyahPCM(
+          sheikhFull,
+          timing.timestamp_from,
+          timing.timestamp_to
+        );
+        const report = analyzeTiming(userPcm, sheikhAyahPcm, timing.segments);
+        if (!cancelled) {
+          setTimingReport(report);
+          setTimingPending(false);
+        }
+      } catch {
+        if (!cancelled) setTimingPending(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [replayResult, surahAudio, verse.verse_key]);
+
+  function playSheikh() {
+    store.playFromVerse(verse.verse_key, { singleVerse: true });
+  }
 
   useEffect(
     () => () => {
@@ -376,7 +425,11 @@ export function AyahRow({
           expectedText={verse.text_uthmani}
           audioBlob={replayResult.audioBlob}
           userWords={replayResult.words}
+          timingReport={timingReport}
+          timingPending={timingPending}
+          words={words}
           onReplayWordIdxChange={setReplayWordIdx}
+          onPlaySheikh={playSheikh}
           onReset={
             continuousOverride ? () => {} : () => setRec({ kind: "idle" })
           }
@@ -408,18 +461,26 @@ function Feedback({
   expectedText,
   audioBlob,
   userWords,
+  timingReport,
+  timingPending,
+  words,
   onReset,
   onAdvance,
   onReplayWordIdxChange,
+  onPlaySheikh,
 }: {
   tokens: DiffToken[];
   transcript: string;
   expectedText: string;
   audioBlob: Blob | null;
   userWords: WordTiming[];
+  timingReport: TimingReport | null;
+  timingPending: boolean;
+  words: string[];
   onReset: () => void;
   onAdvance?: () => void;
   onReplayWordIdxChange: (idx: number) => void;
+  onPlaySheikh: () => void;
 }) {
   const score = accuracyScore(tokens);
   const letterTokens = useMemo(
@@ -539,7 +600,7 @@ function Feedback({
             {score}% words · {letterScore}% letters + tashkeel
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
           {audioUrl && (
             <button
               onClick={isPlaying ? stopReplay : startReplay}
@@ -549,6 +610,13 @@ function Feedback({
               {isPlaying ? "⏸ Stop replay" : "▶ Replay mine"}
             </button>
           )}
+          <button
+            onClick={onPlaySheikh}
+            className="text-xs font-medium rounded-md bg-emerald-600 text-white px-2.5 py-1 hover:bg-emerald-700"
+            title="Play the selected reciter's audio for this ayah"
+          >
+            ▶ Sheikh
+          </button>
           <button
             onClick={onReset}
             className="text-xs text-stone-500 dark:text-stone-400 hover:underline"
@@ -642,6 +710,12 @@ function Feedback({
           ✓ Clean letter + tashkeel match against the Uthmani text.
         </p>
       )}
+      {timingPending && (
+        <p className="mt-3 text-xs text-stone-500 dark:text-stone-400">
+          Comparing your pacing to the sheikh…
+        </p>
+      )}
+      {timingReport && <TimingPanel report={timingReport} words={words} />}
       <details className="mt-2 text-xs text-stone-500 dark:text-stone-400">
         <summary className="cursor-pointer">What the model heard</summary>
         <p
@@ -664,4 +738,65 @@ function pickMimeType(): string | undefined {
     "audio/ogg;codecs=opus",
   ];
   return candidates.find((c) => MediaRecorder.isTypeSupported(c));
+}
+
+function TimingPanel({
+  report,
+  words,
+}: {
+  report: TimingReport;
+  words: string[];
+}) {
+  const totalPct = Math.round(report.totalRatio * 100);
+  const totalKind =
+    report.totalRatio < 0.75
+      ? "rushed"
+      : report.totalRatio > 1.35
+        ? "slow"
+        : "balanced";
+  const totalText =
+    totalKind === "rushed"
+      ? `Overall ${totalPct}% of the sheikh's duration — you're rushing. Try slowing the recitation.`
+      : totalKind === "slow"
+        ? `Overall ${totalPct}% of the sheikh's duration — slower than the reference. Could be intentional (tarteel) or stretched out beyond reference.`
+        : `Overall ${totalPct}% of the sheikh's duration — pacing is in range.`;
+
+  const flagged = report.perWord.filter((w) => w.kind !== "balanced");
+
+  return (
+    <div className="mt-3 rounded-md bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900/60 p-3">
+      <div className="flex items-baseline justify-between gap-2 flex-wrap mb-1.5">
+        <p className="text-xs uppercase tracking-wider text-indigo-800 dark:text-indigo-300 font-semibold">
+          Pacing vs sheikh
+        </p>
+        <p className="text-[10px] text-indigo-700 dark:text-indigo-300 tabular-nums">
+          you {(report.userTotalMs / 1000).toFixed(1)}s · sheikh{" "}
+          {(report.sheikhTotalMs / 1000).toFixed(1)}s
+        </p>
+      </div>
+      <p className="text-xs text-indigo-900 dark:text-indigo-200 mb-2">
+        {totalText}
+      </p>
+      {flagged.length > 0 && (
+        <ul className="text-xs text-indigo-900 dark:text-indigo-200 leading-relaxed space-y-0.5">
+          {flagged.map((w, idx) => {
+            const word = words[w.wordIdx - 1] ?? `word ${w.wordIdx}`;
+            return (
+              <li key={idx}>
+                <span className="arabic" style={{ fontSize: "1rem" }}>
+                  {word}
+                </span>{" "}
+                — {w.feedback}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {flagged.length === 0 && (
+        <p className="text-[11px] text-indigo-700 dark:text-indigo-300 italic">
+          Per-word pacing within the acceptable range vs the sheikh.
+        </p>
+      )}
+    </div>
+  );
 }
