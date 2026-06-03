@@ -12,19 +12,35 @@ export type Grapheme = {
 const ZERO_WIDTH = /[​-‏﻿]/g;
 const TATWEEL = /ـ/g;
 
-const MARK_RANGES: [number, number][] = [
-  [0x064b, 0x065f], // standard tashkeel + tanween + sukun + dagger alif neighbors
-  [0x0670, 0x0670], // dagger alif
-  [0x06d6, 0x06ed], // quran-specific signs (small high marks, ruku' signs)
+// Marks that ACTUALLY affect pronunciation — these participate in the diff.
+const PHONETIC_MARK_RANGES: [number, number][] = [
+  [0x064b, 0x065f], // tashkeel + tanween + sukun + dagger alif neighbors
+  [0x0670, 0x0670], // dagger alif (long aa sound)
 ];
 
-function isMark(ch: string): boolean {
+// Quranic typographic annotations — stop signs, iqlab markers (ۢ), small
+// waws (ۥ), etc. These are guidance for the reciter, not phonetic content.
+// Whisper transcribes plain Arabic and will never output these, so leaving
+// them in the comparison guarantees false "missing mark" errors.
+const QURANIC_ANNOTATION_RANGE: [number, number] = [0x06d6, 0x06ed];
+
+function isPhoneticMark(ch: string): boolean {
   if (!ch) return false;
   const code = ch.codePointAt(0)!;
-  for (const [lo, hi] of MARK_RANGES) {
+  for (const [lo, hi] of PHONETIC_MARK_RANGES) {
     if (code >= lo && code <= hi) return true;
   }
   return false;
+}
+
+function isQuranicAnnotation(ch: string): boolean {
+  if (!ch) return false;
+  const code = ch.codePointAt(0)!;
+  return code >= QURANIC_ANNOTATION_RANGE[0] && code <= QURANIC_ANNOTATION_RANGE[1];
+}
+
+function isMark(ch: string): boolean {
+  return isPhoneticMark(ch) || isQuranicAnnotation(ch);
 }
 
 /** Strip everything that isn't a letter or recognized diacritic. */
@@ -54,14 +70,37 @@ export function parseGraphemes(input: string): Grapheme[] {
     const letter = ch;
     const marks: string[] = [];
     let j = i + 1;
-    while (j < s.length && isMark(s[j])) {
-      marks.push(s[j]);
-      j++;
+    while (j < s.length) {
+      const c = s[j];
+      if (isPhoneticMark(c)) {
+        marks.push(c);
+        j++;
+      } else if (isQuranicAnnotation(c)) {
+        // skip — typographic only, not in Whisper's output anyway
+        j++;
+      } else {
+        break;
+      }
     }
     out.push({ letter, marks, raw: letter + marks.join("") });
     i = j;
   }
   return out;
+}
+
+// ── Mark equivalence ────────────────────────────────────────────────────
+const REAL_VOWELS = new Set(["َ", "ُ", "ِ", "ً", "ٌ", "ٍ"]);
+const SUKUN_CHAR = "ْ";
+
+/** Bare consonant (no vowel mark) is functionally noon-sakinah / sukoon by
+ *  Mushaf convention. Whisper sometimes outputs explicit sukoon, sometimes
+ *  not — both forms mean the same thing. Normalize so they compare equal. */
+function normalizeMarks(marks: string[]): string[] {
+  const hasVowel = marks.some((m) => REAL_VOWELS.has(m));
+  if (!hasVowel && !marks.includes(SUKUN_CHAR)) {
+    return [...marks, SUKUN_CHAR];
+  }
+  return marks;
 }
 
 // Normalize equivalent letter forms (alif variants, ya/alif maqsura, ta marbuta/ha)
@@ -176,23 +215,34 @@ const QALQALAH_ACCEPT: Record<string, string[]> = {
 // Yarmaloon (يرملون) — the 6 letters noon sakinah merges with via idgham.
 const YARMALOON = new Set(["ي", "ر", "م", "ل", "و", "ن"]);
 
-/** Post-process the grapheme diff with three tajweed/recitation rules.
+const TANWEEN_CHARS = new Set(["ً", "ٌ", "ٍ"]);
+
+/** Post-process the grapheme diff with tajweed/recitation tolerance rules.
  *  Each rule re-classifies certain tokens from wrong/missing → correct with
  *  an explanatory feedback string the user can hover. */
 function tajweedTolerate(
   tokens: LetterDiffToken[],
-  wordEndIndices: Set<number>
+  wordEndExpectedIndices: Set<number>
 ): LetterDiffToken[] {
+  // Build a parallel array mapping token index → expected-grapheme index
+  // (so the word-end check works correctly after collapseAdjacentToWrongLetter
+  // merged some pairs).
+  const expectedIdxAtToken: number[] = new Array(tokens.length).fill(-1);
+  let runningExpectedIdx = -1;
+  for (let k = 0; k < tokens.length; k++) {
+    if (tokens[k].expected) {
+      runningExpectedIdx++;
+      expectedIdxAtToken[k] = runningExpectedIdx;
+    }
+  }
+
   const out: LetterDiffToken[] = [];
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
+    const isAtWordEnd = wordEndExpectedIndices.has(expectedIdxAtToken[i]);
 
-    // Rule 1: Idgham (noon sakinah merger).
-    // Expected has bare noon (no vowel = sakinah by Mushaf convention) that's
-    // marked missing. If the very next aligned expected letter is in the
-    // yarmaloon set AND the actual side of that token has shadda, the user
-    // correctly performed idgham (the noon doesn't get pronounced, the next
-    // letter is doubled).
+    // Rule 1: Idgham (noon sakinah merger), case A — noon went entirely
+    // missing in the actual transcript, next letter is yarmaloon with shadda.
     if (t.status === "missing" && t.expected?.letter === "ن") {
       const next = tokens[i + 1];
       if (
@@ -212,14 +262,12 @@ function tajweedTolerate(
     }
 
     // Rule 2: Qalqalah substitution at word end.
-    // د/ت etc. at end of word with sukoon (or final position) are acoustic
-    // neighbors. If Whisper transcribes the substitute, accept it.
     if (t.status === "wrong-letter" && t.expected && t.actual) {
       const eLet = t.expected.letter;
       if (
         QALQALAH.has(eLet) &&
         QALQALAH_ACCEPT[eLet]?.includes(t.actual.letter) &&
-        (t.expected.marks.includes(SUKUN) || wordEndIndices.has(i))
+        (t.expected.marks.includes(SUKUN) || isAtWordEnd)
       ) {
         out.push({
           ...t,
@@ -230,10 +278,7 @@ function tajweedTolerate(
       }
     }
 
-    // Rule 3: Missing shaddah only.
-    // Shaddah is acoustically subtle; Whisper drops it often even when the
-    // recitation is right. If the only mark difference is a missing shaddah
-    // (everything else matches), accept it.
+    // Rule 3: Missing shaddah only — accept as soft acoustic miss.
     if (t.status === "wrong-marks" && t.expected && t.actual) {
       const expectedHasShadda = t.expected.marks.includes(SHADDA);
       const actualHasShadda = t.actual.marks.includes(SHADDA);
@@ -248,6 +293,24 @@ function tajweedTolerate(
           });
           continue;
         }
+      }
+    }
+
+    // Rule 4: Waqf (stopping) at word end — tanween silenced as sukoon is
+    // valid Quran recitation when the reciter is stopping at a word.
+    if (t.status === "wrong-marks" && t.expected && t.actual && isAtWordEnd) {
+      const expectedHasTanween = t.expected.marks.some((m) =>
+        TANWEEN_CHARS.has(m)
+      );
+      const actualHasSukoonOrBare =
+        t.actual.marks.length === 0 || t.actual.marks.includes(SUKUN);
+      if (expectedHasTanween && actualHasSukoonOrBare) {
+        out.push({
+          ...t,
+          status: "correct",
+          feedback: `Waqf: silencing the tanween (${labelLetter(t.expected.letter)} at stop) is correct stopping recitation`,
+        });
+        continue;
       }
     }
 
@@ -359,9 +422,11 @@ export function diffGraphemes(
 }
 
 function sameMarks(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
-  const aSorted = [...a].sort();
-  const bSorted = [...b].sort();
+  const an = normalizeMarks(a);
+  const bn = normalizeMarks(b);
+  if (an.length !== bn.length) return false;
+  const aSorted = [...an].sort();
+  const bSorted = [...bn].sort();
   return aSorted.every((m, i) => m === bSorted[i]);
 }
 
