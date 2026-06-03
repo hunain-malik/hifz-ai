@@ -155,11 +155,17 @@ async function runWithTimings(
       // Word path returned no usable chunks; fall through to synthesized timings
       return { text, words: synthesizeWordTimings(text, durationSec) };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (
-        msg.toLowerCase().includes("cross attentions") ||
-        msg.toLowerCase().includes("output_attentions")
-      ) {
+      const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+      // Any error tied to the model not supporting word-level timestamps —
+      // fall through to the text-only path and synthesize timings. Re-throw
+      // anything that looks like a genuine transcription failure.
+      const isTimestampError =
+        msg.includes("cross attentions") ||
+        msg.includes("output_attentions") ||
+        msg.includes("alignment_heads") ||
+        msg.includes("token-level timestamps") ||
+        msg.includes("return_timestamps");
+      if (isTimestampError) {
         wordTimingsSupported = false;
       } else {
         throw err;
