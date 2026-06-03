@@ -13,7 +13,7 @@ export function normalizeArabic(s: string): string {
   return s
     .replace(TASHKEEL, "")
     .replace(TATWEEL, "")
-    .replace(/[آأإ]/g, "ا")
+    .replace(/[آأإٱ]/g, "ا")
     .replace(/ؤ/g, "و")
     .replace(/ئ/g, "ي")
     .replace(/ى/g, "ي")

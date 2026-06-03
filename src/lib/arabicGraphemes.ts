@@ -371,3 +371,53 @@ export function letterAccuracy(tokens: LetterDiffToken[]): number {
   const correct = tokens.filter((t) => t.status === "correct").length;
   return Math.round((correct / denom) * 100);
 }
+
+// ── Render-friendly feedback walk ──────────────────────────────────────
+// Turns the grapheme diff into a sequence of parts that can be rendered as
+// colored spans, interleaved with original word boundaries from the expected
+// text so the visual layout stays word-by-word like a Mushaf line.
+
+export type RenderPart =
+  | { kind: "space" }
+  | { kind: "expected"; token: LetterDiffToken }
+  | { kind: "extra"; tokens: LetterDiffToken[] };
+
+export function buildFeedbackRendering(
+  expectedRaw: string,
+  actualRaw: string
+): RenderPart[] {
+  const expectedGraphemes = parseGraphemes(expectedRaw);
+  const diff = diffGraphemes(expectedRaw, actualRaw);
+
+  const parts: RenderPart[] = [];
+  let diffIdx = 0;
+
+  function flushExtras() {
+    const extras: LetterDiffToken[] = [];
+    while (diffIdx < diff.length && diff[diffIdx].status === "extra") {
+      extras.push(diff[diffIdx]);
+      diffIdx++;
+    }
+    if (extras.length > 0) parts.push({ kind: "extra", tokens: extras });
+  }
+
+  for (const g of expectedGraphemes) {
+    if (g.letter === " ") {
+      flushExtras();
+      parts.push({ kind: "space" });
+      continue;
+    }
+    flushExtras();
+    if (diffIdx < diff.length) {
+      parts.push({ kind: "expected", token: diff[diffIdx] });
+      diffIdx++;
+    } else {
+      parts.push({
+        kind: "expected",
+        token: { expected: g, actual: null, status: "missing" },
+      });
+    }
+  }
+  flushExtras();
+  return parts;
+}

@@ -10,6 +10,7 @@ import {
   type DiffToken,
 } from "@/lib/diff";
 import {
+  buildFeedbackRendering,
   diffGraphemes,
   letterAccuracy,
   summarizeLetterDiff,
@@ -433,6 +434,10 @@ function Feedback({
     () => summarizeLetterDiff(letterTokens, { limit: 8 }),
     [letterTokens]
   );
+  const renderParts = useMemo(
+    () => buildFeedbackRendering(expectedText, transcript),
+    [expectedText, transcript]
+  );
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -561,35 +566,64 @@ function Feedback({
         </div>
       </div>
       <p className="arabic">
-        {tokens.map((t, i) => (
-          <span
-            key={i}
-            className={[
-              "arabic-word",
-              t.status === "correct" &&
-                "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-200",
-              t.status === "missed" &&
-                "bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 underline decoration-dotted",
-              t.status === "wrong" &&
-                "bg-red-100 dark:bg-red-950/60 text-red-900 dark:text-red-200",
-              t.status === "extra" &&
-                "bg-stone-200 dark:bg-stone-800 text-stone-600 dark:text-stone-400 line-through",
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            title={
-              t.status === "wrong"
-                ? `Heard: ${t.actual ?? ""}`
-                : t.status === "extra"
-                  ? "Extra word heard"
-                  : t.status === "missed"
-                    ? "Not heard"
-                    : ""
-            }
-          >
-            {t.expected ?? t.actual}
-          </span>
-        ))}
+        {renderParts.map((part, i) => {
+          if (part.kind === "space") return <span key={i}> </span>;
+          if (part.kind === "extra") {
+            return (
+              <span
+                key={i}
+                className="arabic-word bg-stone-200 dark:bg-stone-800 text-stone-500 dark:text-stone-500 line-through opacity-70"
+                title={`Extra: you said ${part.tokens.map((t) => t.actual?.raw ?? "").join("")}`}
+              >
+                {part.tokens.map((t) => t.actual?.raw ?? "").join("")}
+              </span>
+            );
+          }
+          const t = part.token;
+          const display = t.expected?.raw ?? t.actual?.raw ?? "";
+          if (t.status === "correct") {
+            return (
+              <span
+                key={i}
+                className="arabic-word bg-emerald-100 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-100"
+              >
+                {display}
+              </span>
+            );
+          }
+          if (t.status === "wrong-marks") {
+            return (
+              <span
+                key={i}
+                className="arabic-word bg-amber-200 dark:bg-amber-900/70 text-amber-950 dark:text-amber-100 ring-1 ring-amber-400 dark:ring-amber-700"
+                title={t.feedback ?? "Right letter, wrong tashkeel"}
+              >
+                {display}
+              </span>
+            );
+          }
+          if (t.status === "wrong-letter") {
+            return (
+              <span
+                key={i}
+                className="arabic-word bg-red-200 dark:bg-red-900/70 text-red-950 dark:text-red-100 ring-1 ring-red-400 dark:ring-red-700"
+                title={t.feedback ?? "Wrong letter"}
+              >
+                {display}
+              </span>
+            );
+          }
+          // missing
+          return (
+            <span
+              key={i}
+              className="arabic-word bg-orange-100 dark:bg-orange-950/60 text-orange-900 dark:text-orange-200 underline decoration-dotted decoration-orange-500"
+              title="You didn't say this letter"
+            >
+              {display}
+            </span>
+          );
+        })}
       </p>
       {letterIssues.length > 0 && (
         <div className="mt-3 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 p-3">
