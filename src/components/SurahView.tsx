@@ -9,6 +9,11 @@ import {
 } from "@/lib/continuousRecite";
 import { loadWhisper, type LoadStatus, type WordTiming } from "@/lib/whisper";
 import { getSheikhSurahPCM } from "@/lib/timingAnalysis";
+import {
+  DEFAULT_TRANSLATION_ID,
+  fetchTranslation,
+} from "@/lib/quran";
+import { getStoredTranslationId } from "./TranslationPicker";
 import { AyahRow, type ContinuousOverride } from "./AyahRow";
 import { PageDivider } from "./PageDivider";
 import { ScrollPageIndicator } from "./ScrollPageIndicator";
@@ -65,12 +70,29 @@ const EMPTY_CONTINUOUS: ContinuousState = {
 export function SurahView({
   surahId,
   verses,
-  translations,
+  translations: initialTranslations,
 }: {
   surahId: number;
   verses: Verse[];
   translations: string[];
 }) {
+  const [translations, setTranslations] = useState<string[]>(initialTranslations);
+
+  useEffect(() => {
+    const storedId = getStoredTranslationId();
+    if (storedId === DEFAULT_TRANSLATION_ID) return;
+    let cancelled = false;
+    fetchTranslation(surahId, storedId)
+      .then((arr) => {
+        if (!cancelled && arr.length > 0) setTranslations(arr);
+      })
+      .catch(() => {
+        // Stick with the default translation on fetch failure.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [surahId]);
   const [reciterId, setReciterId] = useState<number>(DEFAULT_RECITER_ID);
 
   useEffect(() => {

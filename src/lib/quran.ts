@@ -65,19 +65,18 @@ export function pageLabel(pages: [number, number]): string {
 }
 
 // ── Translations ───────────────────────────────────────────────────────
-// Quran.com API translation IDs we expose. Saheeh International is the
-// default (most widely-used English translation, matches quran.com's
-// default). Each entry returns one translation per verse in the surah.
-export const TRANSLATIONS = {
-  saheeh: { id: 20, name: "Saheeh International" },
-  yusufAli: { id: 22, name: "Yusuf Ali" },
-  pickthall: { id: 19, name: "Pickthall" },
-  usmani: { id: 84, name: "Mufti Taqi Usmani" },
-  abdelHaleem: { id: 85, name: "M.A.S. Abdel Haleem" },
-} as const;
+// All translations come from the Quran.com API. The default (Saheeh
+// International, id 20) matches Quran.com's own default; users can pick
+// any translation in any language from the homepage picker.
+export const DEFAULT_TRANSLATION_ID = 20;
 
-export type TranslationKey = keyof typeof TRANSLATIONS;
-export const DEFAULT_TRANSLATION: TranslationKey = "saheeh";
+export type TranslationOption = {
+  id: number;
+  name: string;
+  authorName: string;
+  language: string; // e.g. "English", "Urdu"
+  slug: string;
+};
 
 /** Strip the footnote/markup that Quran.com returns inside translation text. */
 function cleanTranslation(raw: string): string {
@@ -90,11 +89,10 @@ function cleanTranslation(raw: string): string {
 
 export async function fetchTranslation(
   chapterId: number,
-  translationKey: TranslationKey = DEFAULT_TRANSLATION
+  translationId: number = DEFAULT_TRANSLATION_ID
 ): Promise<string[]> {
-  const id = TRANSLATIONS[translationKey].id;
   const res = await fetch(
-    `${QURAN_API}/quran/translations/${id}?chapter_number=${chapterId}`,
+    `${QURAN_API}/quran/translations/${translationId}?chapter_number=${chapterId}`,
     { next: { revalidate: 60 * 60 * 24 * 30 } }
   );
   if (!res.ok) {
@@ -104,6 +102,36 @@ export async function fetchTranslation(
     translations: { text: string }[];
   };
   return data.translations.map((t) => cleanTranslation(t.text));
+}
+
+export async function fetchAvailableTranslations(): Promise<TranslationOption[]> {
+  const res = await fetch(`${QURAN_API}/resources/translations`, {
+    next: { revalidate: 60 * 60 * 24 * 7 },
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch translation list: ${res.status}`);
+  }
+  const data = (await res.json()) as {
+    translations: {
+      id: number;
+      name: string;
+      author_name: string;
+      language_name: string;
+      slug: string;
+    }[];
+  };
+  return data.translations.map((t) => ({
+    id: t.id,
+    name: t.name,
+    authorName: t.author_name,
+    language: capitalize(t.language_name || "Other"),
+    slug: t.slug,
+  }));
+}
+
+function capitalize(s: string): string {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 export type JuzRange = [number, number];

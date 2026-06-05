@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { fetchChapters, fetchJuzMap, juzLabel, pageLabel } from "@/lib/quran";
+import { TranslationPicker } from "@/components/TranslationPicker";
 
 export default async function Home() {
   const [chapters, juzMap] = await Promise.all([fetchChapters(), fetchJuzMap()]);
@@ -16,6 +17,8 @@ export default async function Home() {
           tajweed checks come later.
         </p>
       </section>
+
+      <TranslationPicker />
 
       <section>
         <h2 className="text-sm uppercase tracking-wider text-stone-500 dark:text-stone-400 mb-3">
