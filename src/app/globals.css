@@ -25,10 +25,8 @@
   100% { transform: scale(1); opacity: 1; }
 }
 
-@keyframes introSnapIn {
-  0%   { opacity: 0; transform: scale(0.96); }
-  100% { opacity: 1; transform: scale(1); }
-}
+/* React controls opacity for reveal/hide — the CSS animation only
+   handles transform (the flag sway). */
 
 /* Flag sway — tighter perspective + larger amplitudes so the motion
    is clearly visible at the bismillah font size. The whole phrase
@@ -81,17 +79,12 @@
     0 0 50px rgba(255, 255, 255, 0.35),
     0 0 110px rgba(255, 255, 255, 0.15);
 
-  /* Snap in, then immediately settle into the 11s majestic sway. */
-  animation:
-    introSnapIn 500ms ease-out both,
-    flagMajesticSway 11000ms ease-in-out infinite;
+  animation: flagMajesticSway 11000ms ease-in-out infinite;
   transform-origin: center center;
   will-change: transform;
   backface-visibility: hidden;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .intro-bismillah {
-    animation: introSnapIn 400ms ease-out both;
-  }
+  .intro-bismillah { animation: none; }
 }

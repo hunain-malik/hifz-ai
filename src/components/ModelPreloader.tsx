@@ -2,6 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { loadWhisper, isWhisperLoaded, type LoadStatus } from "@/lib/whisper";
+import { INTRO_DONE_EVENT } from "./IntroOverlay";
+
+// Hard cap on how long we'll wait for the intro to fire its done event
+// before starting the model download anyway. If the intro is disabled or
+// crashes, the model still loads.
+const INTRO_WAIT_FALLBACK_MS = 7500;
 
 type PreloadState =
   | { kind: "idle" }
@@ -19,31 +25,47 @@ export function ModelPreloader() {
       // Already loaded in this tab session — nothing to show.
       return;
     }
-    setState({ kind: "loading", progress: 0 });
     let cancelled = false;
-    loadWhisper((s: LoadStatus) => {
-      if (cancelled) return;
-      if (s.kind === "loading") {
-        setState({ kind: "loading", progress: s.progress });
-      } else if (s.kind === "ready") {
-        setState({ kind: "ready" });
-        // Auto-dismiss the confirmation after a few seconds.
-        setTimeout(() => {
-          if (!cancelled) setDismissed(true);
-        }, 4000);
-      } else if (s.kind === "error") {
-        setState({ kind: "error", message: s.message });
-      }
-    }).catch((err: unknown) => {
-      if (cancelled) return;
-      setState({
-        kind: "error",
-        message:
-          err instanceof Error ? err.message : "Failed to load model",
+    let started = false;
+
+    function start() {
+      if (started || cancelled) return;
+      started = true;
+      setState({ kind: "loading", progress: 0 });
+      loadWhisper((s: LoadStatus) => {
+        if (cancelled) return;
+        if (s.kind === "loading") {
+          setState({ kind: "loading", progress: s.progress });
+        } else if (s.kind === "ready") {
+          setState({ kind: "ready" });
+          setTimeout(() => {
+            if (!cancelled) setDismissed(true);
+          }, 4000);
+        } else if (s.kind === "error") {
+          setState({ kind: "error", message: s.message });
+        }
+      }).catch((err: unknown) => {
+        if (cancelled) return;
+        setState({
+          kind: "error",
+          message:
+            err instanceof Error ? err.message : "Failed to load model",
+        });
       });
-    });
+    }
+
+    // Wait for the intro to finish before starting the 98 MB download —
+    // running both at once (heavy network + decode + WASM init alongside
+    // the CSS 3D sway animation) makes the intro stutter on mid-range
+    // devices.
+    const onIntroDone = () => start();
+    window.addEventListener(INTRO_DONE_EVENT, onIntroDone, { once: true });
+    const fallback = window.setTimeout(start, INTRO_WAIT_FALLBACK_MS);
+
     return () => {
       cancelled = true;
+      window.removeEventListener(INTRO_DONE_EVENT, onIntroDone);
+      clearTimeout(fallback);
     };
   }, []);
 
