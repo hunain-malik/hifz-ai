@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from "react";
 const AUDIO_URL = "https://everyayah.com/data/Alafasy_128kbps/001001.mp3";
 const TEXT_FADE_MS = 700;
 const BLACK_HOLD_MS = 250;
+const PLATFORM_FADE_MS = 900;
 const AUDIO_SYNC_SAFETY_MS = 2500;
 const AUDIO_FALLBACK_HOLD_MS = 5000;
 
@@ -20,8 +21,10 @@ export function IntroOverlay() {
   const [show, setShow] = useState(true);
   const [textVisible, setTextVisible] = useState(false);
   const [textFading, setTextFading] = useState(false);
+  const [platformFading, setPlatformFading] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fallbackTimer = useRef<number | null>(null);
+  const blackHoldTimer = useRef<number | null>(null);
   const hideTimer = useRef<number | null>(null);
   const syncSafetyTimer = useRef<number | null>(null);
   const startedRef = useRef(false);
@@ -45,13 +48,18 @@ export function IntroOverlay() {
     function dismiss() {
       if (didDismissRef.current) return;
       didDismissRef.current = true;
+      // Stage 1: text fades to 0 (700 ms) — black background stays solid.
       setTextFading(true);
-      // After the text has fully faded AND a short all-black hold, drop
-      // the overlay — the platform underneath then appears immediately.
-      hideTimer.current = window.setTimeout(() => {
-        audio.pause();
-        audio.src = "";
-        setShow(false);
+      // Stage 2: brief all-black hold (250 ms) — nothing on screen but black.
+      blackHoldTimer.current = window.setTimeout(() => {
+        // Stage 3: black overlay itself fades out (900 ms), revealing the
+        // platform underneath gradually instead of popping in.
+        setPlatformFading(true);
+        hideTimer.current = window.setTimeout(() => {
+          audio.pause();
+          audio.src = "";
+          setShow(false);
+        }, PLATFORM_FADE_MS);
       }, TEXT_FADE_MS + BLACK_HOLD_MS);
     }
 
@@ -95,6 +103,7 @@ export function IntroOverlay() {
 
     return () => {
       if (fallbackTimer.current !== null) clearTimeout(fallbackTimer.current);
+      if (blackHoldTimer.current !== null) clearTimeout(blackHoldTimer.current);
       if (hideTimer.current !== null) clearTimeout(hideTimer.current);
       if (syncSafetyTimer.current !== null)
         clearTimeout(syncSafetyTimer.current);
@@ -110,10 +119,13 @@ export function IntroOverlay() {
     if (syncSafetyTimer.current !== null)
       clearTimeout(syncSafetyTimer.current);
     audioRef.current?.pause();
-    hideTimer.current = window.setTimeout(
-      () => setShow(false),
-      TEXT_FADE_MS + BLACK_HOLD_MS
-    );
+    blackHoldTimer.current = window.setTimeout(() => {
+      setPlatformFading(true);
+      hideTimer.current = window.setTimeout(
+        () => setShow(false),
+        PLATFORM_FADE_MS
+      );
+    }, TEXT_FADE_MS + BLACK_HOLD_MS);
   }
 
   if (!show) return null;
@@ -124,6 +136,10 @@ export function IntroOverlay() {
       aria-modal="true"
       aria-label="Bismillah"
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black"
+      style={{
+        opacity: platformFading ? 0 : 1,
+        transition: `opacity ${PLATFORM_FADE_MS}ms ease-out`,
+      }}
     >
       {textVisible && (
         <span

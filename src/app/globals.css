@@ -30,38 +30,41 @@
   100% { opacity: 1; transform: scale(1); }
 }
 
-/* True flag sway — 3D perspective rotation + skew so the whole phrase
-   tilts like a piece of fabric in wind. No turbulence filter (which
-   reads as water ripple), no random noise — a single dominant
-   direction with smooth ease-in-out, slow enough to feel majestic. */
+/* Flag sway — tighter perspective + larger amplitudes so the motion
+   is clearly visible at the bismillah font size. The whole phrase
+   tilts as one fabric panel with translateY adding depth-bob. */
 @keyframes flagMajesticSway {
   0%, 100% {
     transform:
-      perspective(1500px)
+      perspective(900px)
       rotateY(0deg)
       skewX(0deg)
-      translateX(0);
+      translateX(0)
+      translateY(0);
   }
   25% {
     transform:
-      perspective(1500px)
-      rotateY(7deg)
-      skewX(-1.6deg)
-      translateX(10px);
+      perspective(900px)
+      rotateY(14deg)
+      skewX(-3deg)
+      translateX(22px)
+      translateY(-6px);
   }
   50% {
     transform:
-      perspective(1500px)
+      perspective(900px)
       rotateY(0deg)
       skewX(0deg)
-      translateX(0);
+      translateX(0)
+      translateY(0);
   }
   75% {
     transform:
-      perspective(1500px)
-      rotateY(-7deg)
-      skewX(1.6deg)
-      translateX(-10px);
+      perspective(900px)
+      rotateY(-14deg)
+      skewX(3deg)
+      translateX(-22px)
+      translateY(6px);
   }
 }
 
@@ -78,10 +81,10 @@
     0 0 50px rgba(255, 255, 255, 0.35),
     0 0 110px rgba(255, 255, 255, 0.15);
 
-  /* Snap in, then immediately settle into the 14s majestic sway. */
+  /* Snap in, then immediately settle into the 11s majestic sway. */
   animation:
     introSnapIn 500ms ease-out both,
-    flagMajesticSway 14000ms ease-in-out infinite;
+    flagMajesticSway 11000ms ease-in-out infinite;
   transform-origin: center center;
   will-change: transform;
   backface-visibility: hidden;
