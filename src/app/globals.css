@@ -25,29 +25,49 @@
   100% { transform: scale(1); opacity: 1; }
 }
 
-@keyframes flagSway {
-  0%   { transform: rotate(0deg)   translateX(0)    scale(1); }
-  20%  { transform: rotate(1.6deg)  translateX(3px)  scale(1.01); }
-  40%  { transform: rotate(0deg)   translateX(0)    scale(1); }
-  60%  { transform: rotate(-1.6deg) translateX(-3px) scale(1.01); }
-  80%  { transform: rotate(0.8deg)  translateX(1px)  scale(1); }
-  100% { transform: rotate(0deg)   translateX(0)    scale(1); }
-}
-
 @keyframes introFadeIn {
-  0% { opacity: 0; transform: scale(0.9); }
+  0%   { opacity: 0; transform: scale(0.92); }
   100% { opacity: 1; transform: scale(1); }
 }
 
-.intro-allah {
-  font-size: min(46vw, 40vh);
+@keyframes flagBaseSway {
+  0%, 100% { transform: rotate(0deg)   translateX(0); }
+  25%      { transform: rotate(1.4deg)  translateX(4px); }
+  50%      { transform: rotate(0deg)   translateX(0); }
+  75%      { transform: rotate(-1.4deg) translateX(-4px); }
+}
+
+.intro-bismillah {
+  /* Same face the ayahs use; explicit font-family in case the .arabic
+     class isn't applied (we don't reuse it here to avoid its text-align
+     right / line-height: 2.75). */
+  font-family: var(--font-quran), "Amiri Quran", "Scheherazade New", serif;
+  direction: rtl;
+  text-align: center;
+  line-height: 1.4;
+  color: #fafaf9;
+  /* min() handles narrow phones AND tall desktops without clipping. */
+  font-size: clamp(2.4rem, 10vw, 7rem);
+  max-width: 92vw;
+  letter-spacing: 0.01em;
+  text-shadow:
+    0 0 50px rgba(255, 255, 255, 0.35),
+    0 0 110px rgba(255, 255, 255, 0.15);
+
+  /* The SVG turbulence filter gives the cloth-like ripple; the CSS
+     animation adds an overall flag-flutter rotation/drift on top so it
+     reads as a flag from any angle. */
+  filter: url(#intro-flag-wave);
   animation:
     introFadeIn 1400ms cubic-bezier(0.16, 1, 0.3, 1) both,
-    flagSway 4500ms ease-in-out 1400ms infinite;
+    flagBaseSway 5500ms ease-in-out 1400ms infinite;
   transform-origin: center center;
-  will-change: transform;
+  will-change: transform, filter;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .intro-allah { animation: introFadeIn 800ms ease-out both; }
+  .intro-bismillah {
+    filter: none;
+    animation: introFadeIn 900ms ease-out both;
+  }
 }

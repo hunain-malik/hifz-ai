@@ -2,19 +2,20 @@
 
 import { useEffect, useRef, useState } from "react";
 
-// First-visit intro: black overlay, الله in the center with a gentle flag-like
-// sway, and an attempt to play the opening of the adhan from /public/adhan.mp3.
-//
-// Browser autoplay policies block sound on a first-ever visit with no prior
-// user gesture — the visual still runs; the audio is best-effort. Returning
-// users won't see this again (localStorage flag).
+// First-visit intro: black overlay with بِسْمِ ٱللَّهِ ٱلرَّحْمَـٰنِ ٱلرَّحِيمِ
+// in the same Amiri Quran face the ayahs use, rendered with an SVG
+// turbulence filter to ripple like cloth on a flag, plus Mishary
+// Al-Afasy's recitation of 1:1 from EveryAyah's CDN. Plays on every
+// fresh page load (no localStorage gate). Only the explicit skip
+// button (or the timer) dismisses — taps on the rest of the overlay
+// no longer auto-close.
 
-const STORAGE_KEY = "hifz-ai.intro-shown";
-const TOTAL_MS = 6000;
-const FADE_MS = 1100;
+const TOTAL_MS = 7000;
+const FADE_MS = 1200;
+const AUDIO_URL = "https://everyayah.com/data/Alafasy_128kbps/001001.mp3";
 
 export function IntroOverlay() {
-  const [show, setShow] = useState(false);
+  const [show, setShow] = useState(true);
   const [fading, setFading] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const hideTimer = useRef<number | null>(null);
@@ -22,15 +23,13 @@ export function IntroOverlay() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (window.localStorage.getItem(STORAGE_KEY)) return;
-    setShow(true);
-    window.localStorage.setItem(STORAGE_KEY, "1");
 
-    const audio = new Audio("/adhan.mp3");
-    audio.volume = 0.75;
+    const audio = new Audio(AUDIO_URL);
+    audio.crossOrigin = "anonymous";
+    audio.volume = 0.8;
     audioRef.current = audio;
     void audio.play().catch(() => {
-      // Autoplay blocked or file missing — visual continues regardless.
+      // Autoplay blocked — visual still proceeds.
     });
 
     fadeTimer.current = window.setTimeout(() => {
@@ -66,31 +65,53 @@ export function IntroOverlay() {
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Welcome"
-      onClick={skip}
-      className={`fixed inset-0 z-[100] flex items-center justify-center bg-black cursor-pointer transition-opacity duration-[1100ms] ease-out ${
+      aria-label="Bismillah"
+      className={`fixed inset-0 z-[100] flex items-center justify-center bg-black transition-opacity ease-out ${
         fading ? "opacity-0" : "opacity-100"
       }`}
+      style={{ transitionDuration: `${FADE_MS}ms` }}
     >
-      <span
-        className="arabic intro-allah select-none"
+      {/* SVG filter defs — feTurbulence + feDisplacementMap distorts the
+          text pixels like a fluttering fabric. The baseFrequency animation
+          shifts the noise pattern over time so the ripple flows. */}
+      <svg
         aria-hidden="true"
-        style={{
-          color: "#f5f5f4",
-          textShadow:
-            "0 0 60px rgba(255,255,255,0.35), 0 0 120px rgba(255,255,255,0.15)",
-          lineHeight: 1,
-        }}
+        style={{ position: "absolute", width: 0, height: 0 }}
       >
-        الله
+        <defs>
+          <filter id="intro-flag-wave">
+            <feTurbulence
+              type="turbulence"
+              baseFrequency="0.012 0.022"
+              numOctaves="2"
+              seed="3"
+              result="noise"
+            >
+              <animate
+                attributeName="baseFrequency"
+                dur="8s"
+                values="0.012 0.022; 0.018 0.014; 0.012 0.022"
+                repeatCount="indefinite"
+              />
+            </feTurbulence>
+            <feDisplacementMap
+              in="SourceGraphic"
+              in2="noise"
+              scale="22"
+              xChannelSelector="R"
+              yChannelSelector="G"
+            />
+          </filter>
+        </defs>
+      </svg>
+
+      <span className="intro-bismillah" aria-hidden="true">
+        بِسْمِ ٱللَّهِ ٱلرَّحْمَـٰنِ ٱلرَّحِيمِ
       </span>
       <button
         type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          skip();
-        }}
-        className="absolute bottom-6 right-6 text-[11px] uppercase tracking-wider text-white/50 hover:text-white/90 transition-colors"
+        onClick={skip}
+        className="absolute bottom-6 right-6 text-[11px] uppercase tracking-wider text-white/55 hover:text-white/90 transition-colors px-2 py-1"
         aria-label="Skip intro"
       >
         skip
