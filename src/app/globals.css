@@ -30,13 +30,39 @@
   100% { opacity: 1; transform: scale(1); }
 }
 
-/* Slow, large rotation/drift — majestic flag carried by wind, not a
-   fluttering pennant. Pairs with the SVG ripple filter on top. */
-@keyframes flagBaseSway {
-  0%, 100% { transform: rotate(0deg)   translateX(0); }
-  25%      { transform: rotate(2.8deg)  translateX(10px); }
-  50%      { transform: rotate(0deg)   translateX(0); }
-  75%      { transform: rotate(-2.8deg) translateX(-10px); }
+/* True flag sway — 3D perspective rotation + skew so the whole phrase
+   tilts like a piece of fabric in wind. No turbulence filter (which
+   reads as water ripple), no random noise — a single dominant
+   direction with smooth ease-in-out, slow enough to feel majestic. */
+@keyframes flagMajesticSway {
+  0%, 100% {
+    transform:
+      perspective(1500px)
+      rotateY(0deg)
+      skewX(0deg)
+      translateX(0);
+  }
+  25% {
+    transform:
+      perspective(1500px)
+      rotateY(7deg)
+      skewX(-1.6deg)
+      translateX(10px);
+  }
+  50% {
+    transform:
+      perspective(1500px)
+      rotateY(0deg)
+      skewX(0deg)
+      translateX(0);
+  }
+  75% {
+    transform:
+      perspective(1500px)
+      rotateY(-7deg)
+      skewX(1.6deg)
+      translateX(-10px);
+  }
 }
 
 .intro-bismillah {
@@ -52,20 +78,17 @@
     0 0 50px rgba(255, 255, 255, 0.35),
     0 0 110px rgba(255, 255, 255, 0.15);
 
-  filter: url(#intro-flag-wave);
-  /* Snap into place in 500 ms (no swing-out, no scale-from-tiny), then
-     start the slow 11s sway with no delay so the wave is already in
-     motion when the user notices the text. */
+  /* Snap in, then immediately settle into the 14s majestic sway. */
   animation:
     introSnapIn 500ms ease-out both,
-    flagBaseSway 11000ms ease-in-out infinite;
+    flagMajesticSway 14000ms ease-in-out infinite;
   transform-origin: center center;
-  will-change: transform, filter;
+  will-change: transform;
+  backface-visibility: hidden;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .intro-bismillah {
-    filter: none;
     animation: introSnapIn 400ms ease-out both;
   }
 }

@@ -2,26 +2,29 @@
 
 import { useEffect, useRef, useState } from "react";
 
-// First-visit intro: black overlay with بِسْمِ ٱللَّهِ ٱلرَّحْمَـٰنِ ٱلرَّحِيمِ
-// in the same Amiri Quran face the ayahs use, rendered with an SVG
-// turbulence filter to ripple slowly like fabric in wind. The
-// recitation of 1:1 (Mishary, EveryAyah CDN) plays the moment the
-// text appears, the overlay holds for the full audio length, then
-// fades out quickly into the platform.
+// First-load intro: black overlay with بِسْمِ ٱللَّهِ ٱلرَّحْمَـٰنِ ٱلرَّحِيمِ
+// in Amiri Quran, sway-animated like a flag carried by wind (CSS 3D
+// transforms — not water-ripple SVG turbulence). Mishary's recitation
+// of 1:1 from the EveryAyah CDN. Text only appears when audio is
+// actually playing; on dismiss, ONLY the text fades — the black
+// background stays solid through the fade, and the platform appears
+// instantly once the overlay unmounts.
 
 const AUDIO_URL = "https://everyayah.com/data/Alafasy_128kbps/001001.mp3";
-const FADE_OUT_MS = 700;
-// Safety net: if audio fails to load OR neither onended nor onerror
-// fires for some reason, dismiss after this long anyway.
-const SAFETY_MAX_MS = 7500;
+const TEXT_FADE_MS = 700;
+const BLACK_HOLD_MS = 250;
+const AUDIO_SYNC_SAFETY_MS = 2500;
+const AUDIO_FALLBACK_HOLD_MS = 5000;
 
 export function IntroOverlay() {
   const [show, setShow] = useState(true);
-  const [fading, setFading] = useState(false);
+  const [textVisible, setTextVisible] = useState(false);
+  const [textFading, setTextFading] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const fadeTimer = useRef<number | null>(null);
+  const fallbackTimer = useRef<number | null>(null);
   const hideTimer = useRef<number | null>(null);
-  const safetyTimer = useRef<number | null>(null);
+  const syncSafetyTimer = useRef<number | null>(null);
+  const startedRef = useRef(false);
   const didDismissRef = useRef(false);
 
   useEffect(() => {
@@ -33,51 +36,84 @@ export function IntroOverlay() {
     audio.preload = "auto";
     audioRef.current = audio;
 
+    function startVisual() {
+      if (startedRef.current) return;
+      startedRef.current = true;
+      setTextVisible(true);
+    }
+
     function dismiss() {
       if (didDismissRef.current) return;
       didDismissRef.current = true;
-      setFading(true);
+      setTextFading(true);
+      // After the text has fully faded AND a short all-black hold, drop
+      // the overlay — the platform underneath then appears immediately.
       hideTimer.current = window.setTimeout(() => {
         audio.pause();
         audio.src = "";
         setShow(false);
-      }, FADE_OUT_MS);
+      }, TEXT_FADE_MS + BLACK_HOLD_MS);
     }
 
+    // Reveal the text the moment audio is actually playing — closes the
+    // "text on screen but audio silent" gap the user was hitting.
+    audio.addEventListener("playing", startVisual, { once: true });
     audio.onended = dismiss;
     audio.onerror = () => {
-      // Audio failed to load — fall back to a sensible 5s hold so the
-      // visual still has presence before fading out.
-      if (!didDismissRef.current) {
-        fadeTimer.current = window.setTimeout(dismiss, 5000);
+      startVisual();
+      if (!didDismissRef.current && fallbackTimer.current === null) {
+        fallbackTimer.current = window.setTimeout(
+          dismiss,
+          AUDIO_FALLBACK_HOLD_MS
+        );
       }
     };
 
     void audio.play().catch(() => {
-      // Autoplay blocked. Visual still proceeds; fade out after 5s.
-      if (!didDismissRef.current) {
-        fadeTimer.current = window.setTimeout(dismiss, 5000);
+      // Autoplay blocked — show the text anyway after a beat and use the
+      // fallback hold so the visual still has presence.
+      startVisual();
+      if (!didDismissRef.current && fallbackTimer.current === null) {
+        fallbackTimer.current = window.setTimeout(
+          dismiss,
+          AUDIO_FALLBACK_HOLD_MS
+        );
       }
     });
 
-    safetyTimer.current = window.setTimeout(dismiss, SAFETY_MAX_MS);
+    // Safety net: if 'playing' hasn't fired within ~2.5s (slow network),
+    // reveal the text so the user isn't staring at black forever.
+    syncSafetyTimer.current = window.setTimeout(() => {
+      startVisual();
+      if (!didDismissRef.current && fallbackTimer.current === null) {
+        fallbackTimer.current = window.setTimeout(
+          dismiss,
+          AUDIO_FALLBACK_HOLD_MS
+        );
+      }
+    }, AUDIO_SYNC_SAFETY_MS);
 
     return () => {
-      if (fadeTimer.current !== null) clearTimeout(fadeTimer.current);
+      if (fallbackTimer.current !== null) clearTimeout(fallbackTimer.current);
       if (hideTimer.current !== null) clearTimeout(hideTimer.current);
-      if (safetyTimer.current !== null) clearTimeout(safetyTimer.current);
+      if (syncSafetyTimer.current !== null)
+        clearTimeout(syncSafetyTimer.current);
       audio.pause();
       audio.src = "";
     };
   }, []);
 
   function skip() {
-    if (fading) return;
-    setFading(true);
-    if (fadeTimer.current !== null) clearTimeout(fadeTimer.current);
-    if (safetyTimer.current !== null) clearTimeout(safetyTimer.current);
+    if (textFading) return;
+    setTextFading(true);
+    if (fallbackTimer.current !== null) clearTimeout(fallbackTimer.current);
+    if (syncSafetyTimer.current !== null)
+      clearTimeout(syncSafetyTimer.current);
     audioRef.current?.pause();
-    hideTimer.current = window.setTimeout(() => setShow(false), FADE_OUT_MS);
+    hideTimer.current = window.setTimeout(
+      () => setShow(false),
+      TEXT_FADE_MS + BLACK_HOLD_MS
+    );
   }
 
   if (!show) return null;
@@ -87,48 +123,20 @@ export function IntroOverlay() {
       role="dialog"
       aria-modal="true"
       aria-label="Bismillah"
-      className={`fixed inset-0 z-[100] flex items-center justify-center bg-black transition-opacity ease-out ${
-        fading ? "opacity-0" : "opacity-100"
-      }`}
-      style={{ transitionDuration: `${FADE_OUT_MS}ms` }}
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black"
     >
-      {/* SVG filter — lower base frequency = larger wave wavelength
-          (a flag flowing in wind), slow 14s animation cycle so the
-          ripple feels majestic, not buzzy. */}
-      <svg
-        aria-hidden="true"
-        style={{ position: "absolute", width: 0, height: 0 }}
-      >
-        <defs>
-          <filter id="intro-flag-wave">
-            <feTurbulence
-              type="turbulence"
-              baseFrequency="0.006 0.010"
-              numOctaves="1"
-              seed="2"
-              result="noise"
-            >
-              <animate
-                attributeName="baseFrequency"
-                dur="14s"
-                values="0.006 0.010; 0.009 0.007; 0.006 0.010"
-                repeatCount="indefinite"
-              />
-            </feTurbulence>
-            <feDisplacementMap
-              in="SourceGraphic"
-              in2="noise"
-              scale="24"
-              xChannelSelector="R"
-              yChannelSelector="G"
-            />
-          </filter>
-        </defs>
-      </svg>
-
-      <span className="intro-bismillah" aria-hidden="true">
-        بِسْمِ ٱللَّهِ ٱلرَّحْمَـٰنِ ٱلرَّحِيمِ
-      </span>
+      {textVisible && (
+        <span
+          className="intro-bismillah"
+          aria-hidden="true"
+          style={{
+            opacity: textFading ? 0 : 1,
+            transition: `opacity ${TEXT_FADE_MS}ms ease-out`,
+          }}
+        >
+          بِسْمِ ٱللَّهِ ٱلرَّحْمَـٰنِ ٱلرَّحِيمِ
+        </span>
+      )}
       <button
         type="button"
         onClick={skip}
