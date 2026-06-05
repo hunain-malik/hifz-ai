@@ -3,6 +3,7 @@ import { Inter, Amiri_Quran } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
 import { ModelPreloader } from "@/components/ModelPreloader";
+import { IntroOverlay } from "@/components/IntroOverlay";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -40,6 +41,7 @@ export default function RootLayout({
             </p>
           </div>
         </header>
+        <IntroOverlay />
         <ModelPreloader />
         <main className="flex-1 w-full max-w-6xl mx-auto px-4 py-6">
           {children}
