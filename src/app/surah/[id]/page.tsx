@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import {
   fetchChapter,
   fetchJuzMap,
+  fetchTranslation,
   fetchVerses,
   juzLabel,
   pageLabel,
@@ -17,13 +18,15 @@ export default async function SurahPage(props: PageProps<"/surah/[id]">) {
     notFound();
   }
 
-  const [chapter, verses, prev, next, juzMap] = await Promise.all([
-    fetchChapter(surahId),
-    fetchVerses(surahId),
-    surahId > 1 ? fetchChapter(surahId - 1) : Promise.resolve(null),
-    surahId < 114 ? fetchChapter(surahId + 1) : Promise.resolve(null),
-    fetchJuzMap(),
-  ]);
+  const [chapter, verses, prev, next, juzMap, translations] =
+    await Promise.all([
+      fetchChapter(surahId),
+      fetchVerses(surahId),
+      surahId > 1 ? fetchChapter(surahId - 1) : Promise.resolve(null),
+      surahId < 114 ? fetchChapter(surahId + 1) : Promise.resolve(null),
+      fetchJuzMap(),
+      fetchTranslation(surahId).catch(() => [] as string[]),
+    ]);
   const juz = juzMap.get(surahId);
 
   return (
@@ -80,7 +83,11 @@ export default async function SurahPage(props: PageProps<"/surah/[id]">) {
         </span>
       </header>
 
-      <SurahView surahId={surahId} verses={verses} />
+      <SurahView
+        surahId={surahId}
+        verses={verses}
+        translations={translations}
+      />
 
       <nav className="mt-8 grid grid-cols-2 gap-3">
         {prev ? (

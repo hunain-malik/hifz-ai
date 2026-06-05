@@ -64,6 +64,48 @@ export function pageLabel(pages: [number, number]): string {
   return pages[0] === pages[1] ? `Page ${pages[0]}` : `Pages ${pages[0]}–${pages[1]}`;
 }
 
+// ── Translations ───────────────────────────────────────────────────────
+// Quran.com API translation IDs we expose. Saheeh International is the
+// default (most widely-used English translation, matches quran.com's
+// default). Each entry returns one translation per verse in the surah.
+export const TRANSLATIONS = {
+  saheeh: { id: 20, name: "Saheeh International" },
+  yusufAli: { id: 22, name: "Yusuf Ali" },
+  pickthall: { id: 19, name: "Pickthall" },
+  usmani: { id: 84, name: "Mufti Taqi Usmani" },
+  abdelHaleem: { id: 85, name: "M.A.S. Abdel Haleem" },
+} as const;
+
+export type TranslationKey = keyof typeof TRANSLATIONS;
+export const DEFAULT_TRANSLATION: TranslationKey = "saheeh";
+
+/** Strip the footnote/markup that Quran.com returns inside translation text. */
+function cleanTranslation(raw: string): string {
+  return raw
+    .replace(/<sup[^>]*>.*?<\/sup>/gi, "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export async function fetchTranslation(
+  chapterId: number,
+  translationKey: TranslationKey = DEFAULT_TRANSLATION
+): Promise<string[]> {
+  const id = TRANSLATIONS[translationKey].id;
+  const res = await fetch(
+    `${QURAN_API}/quran/translations/${id}?chapter_number=${chapterId}`,
+    { next: { revalidate: 60 * 60 * 24 * 30 } }
+  );
+  if (!res.ok) {
+    throw new Error(`Failed to fetch translation: ${res.status}`);
+  }
+  const data = (await res.json()) as {
+    translations: { text: string }[];
+  };
+  return data.translations.map((t) => cleanTranslation(t.text));
+}
+
 export type JuzRange = [number, number];
 
 export async function fetchJuzMap(): Promise<Map<number, JuzRange>> {

@@ -65,9 +65,11 @@ const EMPTY_CONTINUOUS: ContinuousState = {
 export function SurahView({
   surahId,
   verses,
+  translations,
 }: {
   surahId: number;
   verses: Verse[];
+  translations: string[];
 }) {
   const [reciterId, setReciterId] = useState<number>(DEFAULT_RECITER_ID);
 
@@ -297,6 +299,7 @@ export function SurahView({
               {showDivider && <PageDivider page={v.page_number} />}
               <AyahRow
                 verse={v}
+                translation={translations[i]}
                 registry={registry}
                 hasNext={v.verse_number < lastVerseNumber}
                 continuousOverride={override}

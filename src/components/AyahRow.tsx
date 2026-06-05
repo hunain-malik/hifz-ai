@@ -58,6 +58,7 @@ export type ContinuousOverride =
 
 export function AyahRow({
   verse,
+  translation,
   registry,
   hasNext,
   continuousOverride = null,
@@ -65,6 +66,7 @@ export function AyahRow({
   onClearContinuousResult,
 }: {
   verse: Verse;
+  translation?: string;
   registry: ReciteRegistry;
   hasNext: boolean;
   continuousOverride?: ContinuousOverride | null;
@@ -422,6 +424,15 @@ export function AyahRow({
               );
             })}
       </p>
+
+      {translation && (
+        <p
+          dir="ltr"
+          className="mt-3 text-sm leading-relaxed text-stone-700 dark:text-stone-300 italic"
+        >
+          {translation}
+        </p>
+      )}
 
       {continuousOverride?.kind === "result" &&
         continuousOverride.transcript.length === 0 && (
