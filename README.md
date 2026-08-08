@@ -43,9 +43,14 @@ Recite mode requires a Chromium-based browser (Chrome, Edge, Brave, Arc). Firefo
 - **Phase 3** — Multi-Qira'at: Warsh (Nafi'), Qalun (Nafi'), Al-Duri (Abu Amr) text overlays + reciters per Riwayah.
 - **Phase 4** — Hifz mode: spaced repetition over ayat/juz, streaks, weakest-ayah surfacing, blind-recite mode.
 
+## SANAD — verification-first grading
+
+Recite-mode feedback is arbitrated by **SANAD** (`src/lib/sanad/`, see [docs/SANAD.md](docs/SANAD.md)): instead of trusting the recognizer's transcript as testimony, every discrepancy is interrogated — Uthmani-rasm spelling variance, tajweed rules (idgham, waqf, qalqalah), recognizer noise, and self-correction repetitions are *dismissed* (and listed, transparently); phonetically-near calls the recognizer can't reliably distinguish (س↔ص, ك↔ق) are marked *uncertain* rather than accused; only confident deviations are asserted as mistakes. Pacing is judged against the **range across five master reciters**, not one reference — every sheikh recites differently, and style lives inside that envelope.
+
 ## Word-diff legend
 
-- **Green** — recited correctly
+- **Green** — recited correctly (or flag dismissed by SANAD — hover to see why)
+- **Sky blue (dotted underline)** — uncertain: recognizer can't judge it; recite again
 - **Amber (dotted underline)** — expected word not heard (missed)
 - **Red** — wrong word substituted (hover for what the recognizer heard)
 - **Strikethrough** — extra word inserted that wasn't in the ayah

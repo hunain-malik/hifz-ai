@@ -11,12 +11,18 @@ import {
 } from "@/lib/diff";
 import {
   buildWordFeedbackRendering,
-  diffGraphemes,
-  letterAccuracy,
-  summarizeLetterDiff,
   type WordStatus,
 } from "@/lib/arabicGraphemes";
 import {
+  judgeRecitation,
+  fetchSurahEnvelopes,
+  judgePacing,
+  type PacingVerdict,
+  type SanadReport,
+  type SanadWordVerdict,
+} from "@/lib/sanad";
+import {
+  hasNativeWordTimings,
   transcribeWithTimings,
   type LoadStatus,
   type WordTiming,
@@ -141,6 +147,62 @@ export function AyahRow({
   );
   const showInlineFeedback =
     !!wordRenderParts && activeWord === null && replayWordIdx < 0;
+
+  // SANAD verification: interrogate every diff flag before asserting it.
+  const sanadReport = useMemo(
+    () =>
+      replayResult
+        ? judgeRecitation(verse.text_uthmani, replayResult.transcript)
+        : null,
+    [replayResult, verse.text_uthmani]
+  );
+  // Per-display-word verdicts (null when alignment can't be trusted).
+  const sanadByWord = useMemo(() => {
+    if (!sanadReport?.alignedToDisplay) return null;
+    if (sanadReport.words.length !== words.length) return null;
+    return sanadReport.words;
+  }, [sanadReport, words]);
+  const partWordOrdinals = useMemo(() => {
+    if (!wordRenderParts) return null;
+    let w = 0;
+    return wordRenderParts.map((p) => (p.kind === "word" ? w++ : -1));
+  }, [wordRenderParts]);
+
+  // Sheikh-ensemble pacing: judged only against real (non-synthesized) word
+  // timings, and only when the reference chain covers this ayah. State is
+  // keyed to the result it was computed for, so stale verdicts self-expire
+  // without a synchronous reset.
+  const [pacingState, setPacingState] = useState<{
+    forResult: unknown;
+    verdict: PacingVerdict | null;
+  } | null>(null);
+  useEffect(() => {
+    if (!replayResult || replayResult.words.length === 0) return;
+    if (!hasNativeWordTimings()) return;
+    const surahId = Number(verse.verse_key.split(":")[0]);
+    let cancelled = false;
+    fetchSurahEnvelopes(surahId)
+      .then((envelopes) => {
+        if (cancelled) return;
+        const env = envelopes.get(verse.verse_key);
+        if (env) {
+          setPacingState({
+            forResult: replayResult,
+            verdict: judgePacing(replayResult.words, env),
+          });
+        }
+      })
+      .catch(() => {
+        // Envelope is an enhancement — silence network failures.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [replayResult, verse.verse_key]);
+  const pacing =
+    pacingState && pacingState.forResult === replayResult
+      ? pacingState.verdict
+      : null;
 
   // Run DTW timing analysis (sheikh vs user) when we have a result + audio
   useEffect(() => {
@@ -389,16 +451,31 @@ export function AyahRow({
                   </span>
                 );
               }
-              const title = part.letterTokens
+              // SANAD arbitration overrides the raw diff color: dismissed
+              // flags render as correct, near-misses as uncertain (sky),
+              // and only interrogated mistakes keep their warning colors.
+              const verdict: SanadWordVerdict | undefined =
+                sanadByWord && partWordOrdinals && partWordOrdinals[i] >= 0
+                  ? sanadByWord[partWordOrdinals[i]]
+                  : undefined;
+              const rawTitle = part.letterTokens
                 .filter((t) => t.feedback)
                 .map((t) => t.feedback)
                 .join(" · ") || labelForStatus(part.status);
+              let className = classForWordStatus(part.status);
+              let title = rawTitle;
+              if (verdict) {
+                if (verdict.tier === "match" || verdict.tier === "accepted") {
+                  className = classForWordStatus("correct");
+                  title = verdict.reason ?? "Correct";
+                } else if (verdict.tier === "uncertain") {
+                  className =
+                    "bg-sky-100 dark:bg-sky-950/60 text-sky-900 dark:text-sky-200 underline decoration-dotted decoration-sky-500";
+                  title = verdict.reason ?? "Uncertain — recite again";
+                }
+              }
               return (
-                <span
-                  key={i}
-                  className={`arabic-word ${classForWordStatus(part.status)}`}
-                  title={title}
-                >
+                <span key={i} className={`arabic-word ${className}`} title={title}>
                   {part.text}
                 </span>
               );
@@ -475,9 +552,10 @@ export function AyahRow({
         <Feedback
           tokens={replayResult.tokens}
           transcript={replayResult.transcript}
-          expectedText={verse.text_uthmani}
           audioBlob={replayResult.audioBlob}
           userWords={replayResult.words}
+          sanadReport={sanadReport}
+          pacing={pacing}
           timingReport={timingReport}
           timingPending={timingPending}
           words={words}
@@ -513,9 +591,10 @@ export function AyahRow({
 function Feedback({
   tokens,
   transcript,
-  expectedText,
   audioBlob,
   userWords,
+  sanadReport,
+  pacing,
   timingReport,
   timingPending,
   words,
@@ -526,9 +605,10 @@ function Feedback({
 }: {
   tokens: DiffToken[];
   transcript: string;
-  expectedText: string;
   audioBlob: Blob | null;
   userWords: WordTiming[];
+  sanadReport: SanadReport | null;
+  pacing: PacingVerdict | null;
   timingReport: TimingReport | null;
   timingPending: boolean;
   words: string[];
@@ -538,18 +618,6 @@ function Feedback({
   onPlaySheikh: () => void;
 }) {
   const score = accuracyScore(tokens);
-  const letterTokens = useMemo(
-    () => diffGraphemes(expectedText, transcript),
-    [expectedText, transcript]
-  );
-  const letterScore = useMemo(
-    () => letterAccuracy(letterTokens),
-    [letterTokens]
-  );
-  const letterIssues = useMemo(
-    () => summarizeLetterDiff(letterTokens, { limit: 8 }),
-    [letterTokens]
-  );
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -648,7 +716,13 @@ function Feedback({
       <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
         <div className="flex items-center gap-3 flex-wrap">
           <p className="text-xs uppercase tracking-wider text-stone-500 dark:text-stone-400">
-            {score}% words · {letterScore}% letters + tashkeel
+            {sanadReport ? (
+              <>
+                SANAD {sanadReport.score}% verified · {score}% raw words
+              </>
+            ) : (
+              <>{score}% words</>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -684,21 +758,81 @@ function Feedback({
           )}
         </div>
       </div>
-      {letterIssues.length > 0 && (
+      {sanadReport && sanadReport.issues.length > 0 && (
         <div className="mt-3 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 p-3">
           <p className="text-xs uppercase tracking-wider text-amber-800 dark:text-amber-300 mb-1.5 font-semibold">
             What to fix
           </p>
           <ul className="text-xs text-amber-900 dark:text-amber-200 leading-relaxed space-y-0.5">
-            {letterIssues.map((issue, idx) => (
+            {sanadReport.issues.map((issue, idx) => (
               <li key={idx}>{issue}</li>
             ))}
           </ul>
         </div>
       )}
-      {letterIssues.length === 0 && letterScore >= 95 && (
-        <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-400">
-          ✓ Clean letter + tashkeel match against the Uthmani text.
+      {sanadReport && sanadReport.uncertain.length > 0 && (
+        <div className="mt-2 rounded-md bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-900/60 p-3">
+          <p className="text-xs uppercase tracking-wider text-sky-800 dark:text-sky-300 mb-1.5 font-semibold">
+            Uncertain — recite again to confirm
+          </p>
+          <ul className="text-xs text-sky-900 dark:text-sky-200 leading-relaxed space-y-0.5">
+            {sanadReport.uncertain.map((u, idx) => (
+              <li key={idx}>
+                <span className="arabic" style={{ fontSize: "1rem" }}>
+                  {u.word}
+                </span>{" "}
+                — {u.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {sanadReport &&
+        sanadReport.issues.length === 0 &&
+        sanadReport.uncertain.length === 0 && (
+          <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-400">
+            ✓ Verified against the Uthmani text — no confirmed issues.
+          </p>
+        )}
+      {sanadReport && sanadReport.dismissed.length > 0 && (
+        <details className="mt-2 text-xs text-stone-500 dark:text-stone-400">
+          <summary className="cursor-pointer">
+            {sanadReport.dismissed.length} recognizer/orthography{" "}
+            {sanadReport.dismissed.length === 1 ? "flag" : "flags"} dismissed —
+            not counted against you
+          </summary>
+          <ul className="mt-1 leading-relaxed space-y-0.5">
+            {sanadReport.dismissed.map((d, idx) => (
+              <li key={idx}>
+                <span className="arabic" style={{ fontSize: "1rem" }}>
+                  {d.word}
+                </span>{" "}
+                — {d.reason}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {pacing && (
+        <p className="mt-2 text-[11px] text-stone-500 dark:text-stone-400">
+          {pacing.flags.length === 0 ? (
+            <>
+              ⏱ Pacing within the range of {pacing.reciterCount} master
+              reciters on every word.
+            </>
+          ) : (
+            <>
+              ⏱ vs {pacing.reciterCount} master reciters:{" "}
+              {pacing.flags
+                .map(
+                  (f) =>
+                    `${words[f.wordIdx] ?? `word ${f.wordIdx + 1}`} ${
+                      f.kind === "rushed" ? "quicker than any" : "held longer than any"
+                    }`
+                )
+                .join(" · ")}
+            </>
+          )}
         </p>
       )}
       {timingPending && (
