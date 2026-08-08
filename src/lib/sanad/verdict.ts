@@ -60,9 +60,38 @@ function lettersOf(word: string): string[] {
 }
 
 const PHONETIC_MARKS = /[ً-ٰ]/;
+const VOWEL_MARKS = /[ًٌٍَُِ]/; // fatha/damma/kasra + the three tanween
 
 function hasPhoneticMarks(word: string): boolean {
   return PHONETIC_MARKS.test(word);
+}
+
+/** Waqf/pause tolerance: a reciter may stop on ANY word (marked stops like
+ *  the small jeem, or simply for breath) — and stopping silences the final
+ *  vowel. If the only discrepancy is the last letter's marks, and what was
+ *  heard there carries no vowel, this is correct stopping recitation. */
+function isWaqfFinalVowelDrop(tokens: LetterDiffToken[]): boolean {
+  const last = tokens[tokens.length - 1];
+  if (!last || last.status !== "wrong-marks" || !last.actual) return false;
+  for (let i = 0; i < tokens.length - 1; i++) {
+    if (tokens[i].status !== "correct") return false;
+  }
+  return !VOWEL_MARKS.test(last.actual.marks.join(""));
+}
+
+/** Madd as-silah: the small waw/ya on a pronoun ha (لَهُۥ، بِهِۦ) elongates
+ *  the vowel when continuing — recognizers write that sound as a full واو
+ *  or ياء. An extra final glide right after a ha is a correct rendition,
+ *  not an added letter. */
+function isSilahGlide(tokens: LetterDiffToken[]): boolean {
+  const bad = tokens.filter((t) => t.status !== "correct");
+  if (bad.length !== 1) return false;
+  const t = bad[0];
+  if (t !== tokens[tokens.length - 1]) return false;
+  if (t.status !== "extra" || !t.actual) return false;
+  if (t.actual.letter !== "و" && t.actual.letter !== "ي") return false;
+  const prev = tokens[tokens.length - 2];
+  return prev?.expected?.letter === "ه";
 }
 
 function marksOnlyProblem(tokens: LetterDiffToken[]): boolean {
@@ -224,7 +253,32 @@ function judgeWordPair(
     };
   }
 
+  if (isSilahGlide(letterTokens)) {
+    return {
+      expectedWordIdx: eIdx,
+      expected: expWord,
+      heard: actWord,
+      tier: "accepted",
+      reason:
+        "Madd as-silah — the pronoun ha's vowel elongates into a glide when continuing; correct rendition",
+      issues: [],
+      similarity: sim,
+    };
+  }
+
   if (marksOnlyProblem(letterTokens)) {
+    if (isWaqfFinalVowelDrop(letterTokens)) {
+      return {
+        expectedWordIdx: eIdx,
+        expected: expWord,
+        heard: actWord,
+        tier: "accepted",
+        reason:
+          "Waqf — stopping on this word silences its final vowel; pausing or continuing are both correct",
+        issues: [],
+        similarity: sim,
+      };
+    }
     // A transcript with no tashkeel at all is the recognizer declining to
     // vocalize, not the student mis-vocalizing — never grade harakat off it.
     if (!hasPhoneticMarks(actWord)) {
