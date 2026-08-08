@@ -15,6 +15,7 @@ A Quran memorization and recitation-practice web app. Pick any surah, listen to 
 - Auto-scroll to the active ayah as the reciter moves
 - **Recite mode**: in-browser speech recognition (Web Speech API, ar-SA), diffed against the ayah text
 - "Next ayah →" advances recite mode through a surah automatically
+- **Recitation Chat** (`/chat`): a Quran-specialized assistant — ask "Recite Surah Al-Mulk verses 1–5" (or `67:1-5`, "Ayat al-Kursi", any surah name/number) and it recites the exact range with live word highlighting, or ask it tajweed/qira'at questions (madd, qalqalah, noon sakinah, the ten readings…) answered from a hand-checked knowledge base, many with playable demo passages. Recitation is always verified qari audio — never AI-generated.
 
 ## Stack
 

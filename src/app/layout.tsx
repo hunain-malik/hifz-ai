@@ -33,10 +33,18 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
         <header className="border-b border-stone-200 dark:border-stone-800 bg-white/70 dark:bg-stone-950/70 backdrop-blur sticky top-0 z-10">
           <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-            <Link href="/" className="font-semibold tracking-tight text-lg">
-              Hifz AI
-            </Link>
-            <p className="text-xs text-stone-500 dark:text-stone-400">
+            <div className="flex items-center gap-4">
+              <Link href="/" className="font-semibold tracking-tight text-lg">
+                Hifz AI
+              </Link>
+              <Link
+                href="/chat"
+                className="text-sm text-emerald-700 dark:text-emerald-400 hover:underline"
+              >
+                💬 Recitation Chat
+              </Link>
+            </div>
+            <p className="text-xs text-stone-500 dark:text-stone-400 hidden sm:block">
               Supplement, not substitute. Always learn from a qualified teacher.
             </p>
           </div>
