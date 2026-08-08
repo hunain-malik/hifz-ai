@@ -43,6 +43,12 @@ export default function RootLayout({
               >
                 💬 Recitation Chat
               </Link>
+              <Link
+                href="/sanad"
+                className="text-sm text-amber-700 dark:text-amber-400 hover:underline"
+              >
+                🎙 SANAD
+              </Link>
             </div>
             <p className="text-xs text-stone-500 dark:text-stone-400 hidden sm:block">
               Supplement, not substitute. Always learn from a qualified teacher.
