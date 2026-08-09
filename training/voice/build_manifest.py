@@ -40,9 +40,18 @@ def fetch_uthmani_verses() -> list[dict]:
     verses = []
     page = 1
     while True:
-        data = fetch_json(
-            f"{QURAN_API}/quran/verses/uthmani?page={page}&per_page=1000"
-        )
+        print(f"fetching verse text… page {page} ({len(verses)}/6236 so far)",
+              flush=True)
+        for attempt in range(3):
+            try:
+                data = fetch_json(
+                    f"{QURAN_API}/quran/verses/uthmani?page={page}&per_page=1000"
+                )
+                break
+            except Exception as e:  # noqa: BLE001 — retry transient network errors
+                if attempt == 2:
+                    raise
+                print(f"  retry {attempt + 1}/2 after error: {e}", flush=True)
         batch = data.get("verses", [])
         if not batch:
             break
