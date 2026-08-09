@@ -68,7 +68,10 @@ def main() -> None:
     rows = [json.loads(l) for l in open(args.manifest, encoding="utf-8")]
     meta, train, evalr = [], [], []
 
+    total = len(rows)
+    print(f"processing {total} ayat…", flush=True)
     for i, row in enumerate(rows):
+        print(f"[{i + 1}/{total}] {row['reciter']} {row['verse_key']}", flush=True)
         reciter_dir = os.path.join(args.out, "wavs", row["reciter"])
         os.makedirs(reciter_dir, exist_ok=True)
         surah, ayah = row["verse_key"].split(":")
