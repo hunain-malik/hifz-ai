@@ -45,28 +45,26 @@ def fetch_json(url: str) -> dict:
 
 def fetch_uthmani_verses() -> list[dict]:
     """All 6,236 ayat with Uthmani text and verse keys."""
+    # This endpoint returns the ENTIRE mushaf in one response and ignores
+    # pagination params — loop-fetching it duplicates the whole Quran per
+    # "page". One fetch, then dedupe defensively by verse_key.
+    print("fetching the full Uthmani text (one request)…", flush=True)
+    data = None
+    for attempt in range(3):
+        try:
+            data = fetch_json(f"{QURAN_API}/quran/verses/uthmani")
+            break
+        except Exception as e:  # noqa: BLE001 — retry transient network errors
+            if attempt == 2:
+                raise
+            print(f"  retry {attempt + 1}/2 after error: {e}", flush=True)
+    seen = set()
     verses = []
-    page = 1
-    while True:
-        print(f"fetching verse text… page {page} ({len(verses)}/6236 so far)",
-              flush=True)
-        for attempt in range(3):
-            try:
-                data = fetch_json(
-                    f"{QURAN_API}/quran/verses/uthmani?page={page}&per_page=1000"
-                )
-                break
-            except Exception as e:  # noqa: BLE001 — retry transient network errors
-                if attempt == 2:
-                    raise
-                print(f"  retry {attempt + 1}/2 after error: {e}", flush=True)
-        batch = data.get("verses", [])
-        if not batch:
-            break
-        verses.extend(batch)
-        if len(batch) < 1000:
-            break
-        page += 1
+    for v in data.get("verses", []):
+        if v["verse_key"] not in seen:
+            seen.add(v["verse_key"])
+            verses.append(v)
+    print(f"got {len(verses)} unique ayat", flush=True)
     if len(verses) < 6236:
         print(f"warning: only {len(verses)} verses fetched", file=sys.stderr)
     return verses
