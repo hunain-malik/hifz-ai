@@ -20,13 +20,13 @@ import csv
 import json
 import os
 import sys
-import urllib.request
 
 try:
     import librosa
+    import requests
     import soundfile as sf
 except ImportError:
-    print("pip install librosa soundfile", file=sys.stderr)
+    print("pip install librosa soundfile requests", file=sys.stderr)
     sys.exit(1)
 
 
@@ -34,9 +34,11 @@ def download(url: str, path: str) -> bool:
     if os.path.exists(path):
         return True
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "sanad-voice/0.1"})
-        with urllib.request.urlopen(req, timeout=60) as r, open(path, "wb") as f:
-            f.write(r.read())
+        r = requests.get(url, headers={"User-Agent": "sanad-voice/0.1"},
+                         timeout=(10, 60))
+        r.raise_for_status()
+        with open(path, "wb") as f:
+            f.write(r.content)
         return True
     except Exception as e:  # noqa: BLE001 — log and skip, dataset build must continue
         print(f"skip {url}: {e}", file=sys.stderr)

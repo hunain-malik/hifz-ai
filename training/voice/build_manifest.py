@@ -13,7 +13,12 @@ Usage:
 import argparse
 import json
 import sys
-import urllib.request
+
+try:
+    import requests
+except ImportError:
+    print("pip install requests", file=sys.stderr)
+    sys.exit(1)
 
 QURAN_API = "https://api.quran.com/api/v4"
 EVERYAYAH = "https://everyayah.com/data"
@@ -30,9 +35,12 @@ KNOWN_RECITERS = [
 
 
 def fetch_json(url: str) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent": "sanad-voice/0.1"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.load(r)
+    # requests over urllib: browser-grade connection handling (proxy, IPv6
+    # fallback) — urllib is known to hang on Windows networks where the
+    # browser works fine.
+    r = requests.get(url, headers={"User-Agent": "sanad-voice/0.1"}, timeout=(10, 30))
+    r.raise_for_status()
+    return r.json()
 
 
 def fetch_uthmani_verses() -> list[dict]:
