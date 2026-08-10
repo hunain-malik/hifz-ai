@@ -37,6 +37,8 @@ export function rasmNormalize(input: string): string {
   // Uthmani final dotless yaa: preceded by kasra it IS yaa (فِى = fī) —
   // recognizers write فِي. Only a fatha-context final ى is the ā sound.
   s = s.replace(/ِى/g, "ِي");
+  // …and a dotless ى CARRYING its own vowel (يُحْىِ = yuḥyī) is also yaa.
+  s = s.replace(/ى(?=[َُِّ])/g, "ي");
 
   // Alif maqsura at word end sounds as ā; recognizers write either ى or ا.
   s = s.replace(/ى(?=[\sً-ٰ]*(\s|$))/g, "ا");
