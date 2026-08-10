@@ -30,10 +30,30 @@ const rows: Row[] = readFileSync(path, "utf-8")
   .filter(Boolean)
   .map((l) => JSON.parse(l));
 
+// Muqatta'at openings are recited as letter NAMES ("alif-lam-ra") — no
+// text-level comparison is valid. They are excused to the human ear.
+const MUQATTAAT = new Set([
+  "الم", "الر", "المص", "المر", "كهيعص", "طه", "طسم", "طس", "يس", "ص",
+  "حم", "عسق", "ق", "ن",
+]);
+function isMuqattaat(expected: string): boolean {
+  const words = expected
+    .replace(/[ً-ٰٟۖ-ۭ࣓-ࣿـ]/g, "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return words.length >= 1 && words.length <= 2 && words.every((w) => MUQATTAAT.has(w));
+}
+
 let passed = 0;
+let excused = 0;
 const failures: { row: Row; why: string[] }[] = [];
 
 for (const row of rows) {
+  if (isMuqattaat(row.expected)) {
+    excused++;
+    continue;
+  }
   const report = judgeRecitation(row.expected, row.transcript);
   const why: string[] = [];
   if (report.score < 100) why.push(`verified score ${report.score}`);
@@ -49,7 +69,10 @@ for (const row of rows) {
   else failures.push({ row, why });
 }
 
-console.log(`SANAD gate: ${passed}/${rows.length} samples verified`);
+console.log(
+  `SANAD gate: ${passed}/${rows.length - excused} samples verified` +
+    (excused ? ` (${excused} muqatta'at excused to human review)` : "")
+);
 for (const f of failures) {
   console.log(`\n✗ ${f.row.verse_key} (${f.row.file})`);
   for (const w of f.why) console.log(`   ${w}`);
